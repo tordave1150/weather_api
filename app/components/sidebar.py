@@ -17,55 +17,74 @@ def render_sidebar(collection, available_provinces: list[str]) -> dict:
 
     Args:
         collection: PyMongo collection object.
+        available_provinces: Sorted list of all province names.
 
     Returns:
-        Dict with keys: 'selected_date', 'regions', 'rain_levels'.
+        Dict with keys: 'selected_date', 'regions', 'rain_levels', 'province_search'.
     """
-    st.sidebar.header("🔍 Filters")
+    with st.sidebar:
+        # ── Logo row ──────────────────────────────────────────────────
+        st.markdown("""
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:20px; padding: 4px 0;">
+            <div style="
+                width:26px; height:26px;
+                background:#1D9E75;
+                border-radius:7px;
+                display:flex; align-items:center; justify-content:center;
+                font-size:14px; color:white;
+            ">⛈</div>
+            <span style="font-size:14px; font-weight:500; color:var(--color-text-primary, #E8E6DE);">Weather Advisor</span>
+        </div>
+        """, unsafe_allow_html=True)
 
-    # ── Date picker — bounded to available dates in MongoDB ────────────
-    min_date_str, max_date_str = get_date_range(collection)
+        # ── Date picker ───────────────────────────────────────────────
+        st.markdown('<p style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:#6B6A63; margin-bottom:4px;">DATE</p>', unsafe_allow_html=True)
 
-    if min_date_str and max_date_str:
-        min_date = datetime.strptime(min_date_str, "%Y-%m-%d").date()
-        max_date = datetime.strptime(max_date_str, "%Y-%m-%d").date()
-    else:
-        # No data yet — default to today
-        min_date = date.today()
-        max_date = date.today()
+        min_date_str, max_date_str = get_date_range(collection)
+        if min_date_str and max_date_str:
+            min_date = datetime.strptime(min_date_str, "%Y-%m-%d").date()
+            max_date = datetime.strptime(max_date_str, "%Y-%m-%d").date()
+        else:
+            min_date = date.today()
+            max_date = date.today()
 
-    selected_date = st.sidebar.date_input(
-        "📅 Select Date",
-        value=max_date,
-        min_value=min_date,
-        max_value=max_date,
-    )
+        selected_date = st.date_input(
+            "📅 Select Date",
+            value=max_date,
+            min_value=min_date,
+            max_value=max_date,
+            label_visibility="collapsed",
+        )
 
-    # ── Region multi-select ────────────────────────────────────────────
-    regions = st.sidebar.multiselect(
-        "🗺️ Regions",
-        options=ALL_REGIONS,
-        default=ALL_REGIONS,
-    )
+        # ── Region multi-select ───────────────────────────────────────
+        st.markdown('<p style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:#6B6A63; margin: 16px 0 4px 0;">REGION</p>', unsafe_allow_html=True)
+        regions = st.multiselect(
+            "🗺️ Regions",
+            options=ALL_REGIONS,
+            default=ALL_REGIONS,
+            label_visibility="collapsed",
+        )
 
-    # ── Rain level filter ──────────────────────────────────────────────
-    rain_levels = st.sidebar.multiselect(
-        "🌧️ Rain Level",
-        options=ALL_RAIN_LEVELS,
-        default=["Moderate Rain", "Heavy Rain", "Very Heavy Rain"],
-    )
+        # ── Rain level filter ─────────────────────────────────────────
+        st.markdown('<p style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:#6B6A63; margin: 16px 0 4px 0;">RAIN LEVEL</p>', unsafe_allow_html=True)
+        rain_levels = st.multiselect(
+            "🌧️ Rain Level",
+            options=ALL_RAIN_LEVELS,
+            default=["Moderate Rain", "Heavy Rain", "Very Heavy Rain"],
+            label_visibility="collapsed",
+        )
 
-    # ── Province filter ────────────────────────────────────────────────
-    selected_provinces = st.sidebar.multiselect(
-        "📍 Provinces",
-        options=available_provinces,
-        default=[],
-        help="Leave empty to show all provinces in selected regions"
-    )
+        # ── Province search ───────────────────────────────────────────
+        st.markdown('<p style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:#6B6A63; margin: 16px 0 4px 0;">PROVINCE</p>', unsafe_allow_html=True)
+        province_search = st.text_input(
+            "🔍 Filter province",
+            placeholder="Filter province...",
+            label_visibility="collapsed",
+        )
 
     return {
         "selected_date": selected_date.strftime("%Y-%m-%d") if isinstance(selected_date, date) else str(selected_date),
         "regions": regions,
         "rain_levels": rain_levels,
-        "provinces": selected_provinces,
+        "province_search": province_search,
     }

@@ -1,18 +1,19 @@
 """
 Map view component — pydeck ScatterplotLayer for province rain data.
+Updated to match redesign spec: new dot colors, light map style.
 """
 
 import streamlit as st
 import pydeck as pdk
 
 
-# Color mapping: rain_level → RGBA
+# Color mapping from spec Section 3.5: rain_level → RGBA
 RAIN_COLORS = {
-    "No Rain":         [76, 175, 80, 180],     # green
-    "Light Rain":      [205, 220, 57, 180],     # lime/yellow-green
-    "Moderate Rain":   [255, 235, 59, 200],     # yellow
-    "Heavy Rain":      [255, 152, 0, 210],      # orange
-    "Very Heavy Rain": [244, 67, 54, 230],      # red
+    "No Rain":         [150, 150, 150, 140],     # gray
+    "Light Rain":      [29, 158, 117, 160],       # teal
+    "Moderate Rain":   [29, 158, 117, 200],       # teal #1D9E75
+    "Heavy Rain":      [239, 159, 39, 220],       # amber #EF9F27
+    "Very Heavy Rain": [226, 75, 74, 240],        # red #E24B4A
 }
 
 
@@ -30,16 +31,23 @@ def render_map(data: list[dict]):
     map_data = []
     for doc in data:
         color = RAIN_COLORS.get(doc.get("rain_level", "No Rain"), [150, 150, 150, 150])
-        # Radius proportional to rain_probability (min 3000m, max 25000m)
-        prob = doc.get("rain_probability", 0)
-        radius = 3000 + (prob / 100) * 22000
+        # Smaller, cleaner dots — radius based on rain level
+        level = doc.get("rain_level", "No Rain")
+        if level == "Very Heavy Rain":
+            radius = 12000
+        elif level == "Heavy Rain":
+            radius = 10000
+        elif level == "Moderate Rain":
+            radius = 8000
+        else:
+            radius = 6000
 
         map_data.append({
             "lat": doc.get("lat", doc.get("latitude", 13.7563)),
             "lon": doc.get("lon", doc.get("longitude", 100.5018)),
             "province": doc.get("province", ""),
             "region": doc.get("region", ""),
-            "rain_probability": prob,
+            "rain_probability": doc.get("rain_probability", 0),
             "rain_level": doc.get("rain_level", ""),
             "rain_volume_mm": doc.get("rain_volume_mm", 0),
             "color": color,
@@ -53,9 +61,9 @@ def render_map(data: list[dict]):
         get_radius="radius",
         get_fill_color="color",
         pickable=True,
-        opacity=0.7,
+        opacity=0.8,
         stroked=True,
-        get_line_color=[255, 255, 255, 100],
+        get_line_color=[255, 255, 255, 60],
         line_width_min_pixels=1,
     )
 
@@ -76,11 +84,12 @@ def render_map(data: list[dict]):
             "Volume: {rain_volume_mm} mm"
         ),
         "style": {
-            "backgroundColor": "rgba(30, 30, 30, 0.9)",
-            "color": "white",
-            "fontSize": "13px",
+            "backgroundColor": "rgba(26, 26, 26, 0.95)",
+            "color": "#E8E6DE",
+            "fontSize": "12px",
             "padding": "8px 12px",
-            "borderRadius": "6px",
+            "borderRadius": "8px",
+            "border": "0.5px solid rgba(255,255,255,0.1)",
         },
     }
 
@@ -89,7 +98,7 @@ def render_map(data: list[dict]):
             layers=[layer],
             initial_view_state=view_state,
             tooltip=tooltip,
-            map_style="mapbox://styles/mapbox/dark-v11",
+            map_style="https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
         ),
         use_container_width=True,
     )

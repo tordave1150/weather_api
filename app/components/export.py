@@ -1,5 +1,6 @@
 """
 Export component — CSV and Excel download buttons for the sidebar.
+Styled with section label per redesign spec.
 """
 
 import io
@@ -39,24 +40,25 @@ def render_export(data: list[dict], selected_date: str):
 
     df = pd.DataFrame(rows)
 
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("📥 Export Data")
+    with st.sidebar:
+        st.markdown("---")
+        st.markdown('<p style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:#6B6A63; margin-bottom:8px;">EXPORT DATA</p>', unsafe_allow_html=True)
 
-    # ── CSV download ───────────────────────────────────────────────────
-    csv_data = df.to_csv(index=False).encode("utf-8")
-    st.sidebar.download_button(
-        label="⬇️ Export CSV",
-        data=csv_data,
-        file_name=f"weather_audit_{selected_date}.csv",
-        mime="text/csv",
-    )
+        # ── CSV download ──────────────────────────────────────────────
+        csv_data = df.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="📄 Export CSV",
+            data=csv_data,
+            file_name=f"weather_audit_{selected_date}.csv",
+            mime="text/csv",
+        )
 
-    # ── Excel download ─────────────────────────────────────────────────
-    buffer = io.BytesIO()
-    df.to_excel(buffer, index=False, engine="openpyxl")
-    st.sidebar.download_button(
-        label="⬇️ Export Excel",
-        data=buffer.getvalue(),
-        file_name=f"weather_audit_{selected_date}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
+        # ── Excel download ────────────────────────────────────────────
+        buffer = io.BytesIO()
+        df.to_excel(buffer, index=False, engine="openpyxl")
+        st.download_button(
+            label="📊 Export Excel",
+            data=buffer.getvalue(),
+            file_name=f"weather_audit_{selected_date}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
