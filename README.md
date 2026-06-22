@@ -154,15 +154,27 @@ streamlit run app/main.py
 
 ## ETL Process (วิธีอัปเดตข้อมูล)
 
-ข้อมูลอัปเดตผ่านสคริปต์ `etl/fetch_weather.py`:
+ข้อมูลอัปเดตผ่านสคริปต์ `etl/fetch_weather.py` — รันอัตโนมัติผ่าน **GitHub Actions** วันละ 2 รอบ
+
+### 🤖 GitHub Actions (Automated)
+
+Workflow: `.github/workflows/etl.yml`
+
+- ระบบจะ **รันอัตโนมัติ** วันละ 2 รอบตามตาราง Cron ด้านล่าง
+- Credentials ดึงจาก **GitHub Repository Secrets** (ไม่ hardcode ในโค้ด)
+- สามารถ **Manual Trigger** ได้จากแท็บ Actions บน GitHub (Run workflow)
+
+### 🖥️ รันมือ (Local)
 
 ```bash
-# รันมือ (ค่าเริ่มต้น = morning round)
+# ค่าเริ่มต้น = morning round
 python etl/fetch_weather.py
 
 # ระบุรอบ afternoon
 python etl/fetch_weather.py --round afternoon
 ```
+
+> 💡 เมื่อรันในเครื่อง สคริปต์จะอ่าน credentials จาก `.streamlit/secrets.toml` โดยอัตโนมัติ
 
 ### Cron Schedule
 
@@ -188,12 +200,15 @@ python etl/fetch_weather.py --round afternoon
 | Data Source | Open-Meteo API (Free Tier, no key required) |
 | Database | MongoDB Atlas |
 | ETL | Python script (`etl/fetch_weather.py`) |
+| CI/CD | GitHub Actions (cron schedule, 2 runs/day) |
 | Design System | Linear Design System (via open-design) |
-| Hosting | Run locally (`streamlit run app/main.py`) |
+| Hosting | Streamlit Cloud / Local (`streamlit run app/main.py`) |
 
 ---
 
 ## Configuration
+
+### Local Development
 
 สร้างไฟล์ `.streamlit/secrets.toml`:
 
@@ -204,12 +219,31 @@ db_name    = "<your_database>"
 collection = "<your_collection>"
 ```
 
+### GitHub Actions (CI/CD)
+
+เพิ่ม Repository Secrets ใน GitHub:
+
+```
+Settings → Secrets and variables → Actions → New repository secret
+```
+
+| Secret name | ค่า |
+|---|---|
+| `MONGODB_URI` | `mongodb+srv://<user>:<password>@<cluster>.mongodb.net/` |
+| `MONGODB_DB_NAME` | ชื่อ database |
+| `MONGODB_COLLECTION` | ชื่อ collection |
+
+> ⚠️ **MongoDB Atlas Network Access**: ต้องอนุญาต IP `0.0.0.0/0` เพราะ GitHub Actions runners ใช้ IP ที่เปลี่ยนทุกครั้ง
+
 ---
 
 ## Project Structure
 
 ```
 weather_api/
+├── .github/
+│   └── workflows/
+│       └── etl.yml              # GitHub Actions — ETL cron (2 runs/day)
 ├── app/
 │   ├── main.py                  # หน้าหลัก Dashboard
 │   ├── db.py                    # MongoDB connection & queries
@@ -220,7 +254,7 @@ weather_api/
 │       ├── table_view.py        # ตารางข้อมูลจังหวัด
 │       └── export.py            # Export CSV/JSON
 ├── etl/
-│   └── fetch_weather.py         # สคริปต์ดึงข้อมูลรายวัน
+│   └── fetch_weather.py         # สคริปต์ดึงข้อมูลรายวัน (env vars + secrets.toml)
 ├── data/
 │   └── provinces.json           # พิกัด lat/lon ของ 77 จังหวัด
 └── requirements.txt
