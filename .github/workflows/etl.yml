@@ -1,0 +1,60 @@
+name: Weather ETL
+
+on:
+  schedule:
+    # Bangkok time = UTC+7
+    # Morning round  → 05:00 BKK = 22:00 UTC (previous day)
+    # Afternoon round → 13:00 BKK = 06:00 UTC
+    - cron: "0 22 * * *"
+    - cron: "0 6 * * *"
+
+  # Allow manual trigger from GitHub UI (Actions tab → Run workflow)
+  workflow_dispatch:
+    inputs:
+      round:
+        description: "ETL round to run"
+        required: true
+        default: "morning"
+        type: choice
+        options:
+          - morning
+          - afternoon
+
+jobs:
+  fetch-weather:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Determine ETL round
+        id: round
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "value=${{ github.event.inputs.round }}" >> $GITHUB_OUTPUT
+          else
+            HOUR=$(date -u +%H)
+            if [ "$HOUR" = "22" ]; then
+              echo "value=morning" >> $GITHUB_OUTPUT
+            else
+              echo "value=afternoon" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Run ETL
+        env:
+          MONGODB_URI:        ${{ secrets.MONGODB_URI }}
+          MONGODB_DB_NAME:    ${{ secrets.MONGODB_DB_NAME }}
+          MONGODB_COLLECTION: ${{ secrets.MONGODB_COLLECTION }}
+        run: python etl/fetch_weather.py --round ${{ steps.round.outputs.value }}

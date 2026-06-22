@@ -21,13 +21,39 @@ import argparse
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
+import os
+
 import toml
 from pymongo import MongoClient
 
 # ── Path setup ────────────────────────────────────────────────────────────────
 ROOT           = Path(__file__).parents[1]
-SECRETS        = toml.load(ROOT / ".streamlit/secrets.toml")
 PROVINCES_PATH = ROOT / "data/provinces.json"
+
+
+# ── SECRETS loading (env vars first, fall back to secrets.toml) ───────────────
+def _load_secrets() -> dict:
+    """Load MongoDB credentials.
+    Priority: environment variables (GitHub Actions) → .streamlit/secrets.toml (local).
+    """
+    uri      = os.getenv("MONGODB_URI")
+    db_name  = os.getenv("MONGODB_DB_NAME")
+    col_name = os.getenv("MONGODB_COLLECTION")
+
+    if uri and db_name and col_name:
+        return {"mongodb": {"uri": uri, "db_name": db_name, "collection": col_name}}
+
+    secrets_path = ROOT / ".streamlit/secrets.toml"
+    if secrets_path.exists():
+        return toml.load(secrets_path)
+
+    raise RuntimeError(
+        "No MongoDB credentials found. "
+        "Set MONGODB_URI, MONGODB_DB_NAME, MONGODB_COLLECTION env vars "
+        "or provide .streamlit/secrets.toml."
+    )
+
+SECRETS = _load_secrets()
 
 # ── Import shared weather client ──────────────────────────────────────────────
 sys.path.insert(0, str(ROOT))
