@@ -16,7 +16,6 @@ import pandas as pd
 from db import get_db, get_forecasts
 from components.sidebar import render_sidebar
 from components.map_view import render_map
-from components.table_view import render_table
 from components.export import render_export
 
 # ── Page Config ────────────────────────────────────────────────────────
@@ -511,36 +510,36 @@ with kpi4:
     st.metric("Avg Rain Probability", f"{avg_prob}%")
     st.markdown(f'<p class="metric-sub">Across all {total_locations} {location_label_lower}</p>', unsafe_allow_html=True)
 
-# ── Map + Table Side-by-Side ──────────────────────────────────────────
-col_map, col_table = st.columns(2)
+# ── Map Side-by-Side (Predicted vs Current) ───────────────────────────
+col_map_pred, col_map_curr = st.columns(2)
 
-with col_map:
-    # Map card header with legend
-    map_title = "🗺️ Rain Map (Choropleth)"
+with col_map_pred:
+    map_title_pred = f"🗺️ Predicted Daily Rain ({location_label})"
     st.markdown(f"""
     <div class="section-card-header">
-        <h3>{map_title}</h3>
+        <h3>{map_title_pred}</h3>
         <div class="legend">
-            <span><span class="dot" style="background:#1D9E75;"></span>Moderate</span>
+            <span><span class="dot" style="background:#1D9E75;"></span>Mod</span>
             <span><span class="dot" style="background:#EF9F27;"></span>Heavy</span>
-            <span><span class="dot" style="background:#E24B4A;"></span>Very Heavy</span>
+            <span><span class="dot" style="background:#E24B4A;"></span>V.Heavy</span>
         </div>
     </div>
     """, unsafe_allow_html=True)
-    render_map(data)
+    render_map(data, level=level, map_type="predicted")
 
-with col_table:
-    # Table card header
-    table_title = f"📋 {location_label} Forecast Data"
+with col_map_curr:
+    map_title_curr = f"📡 Current Rain (Latest Refresh) ({location_label})"
     st.markdown(f"""
     <div class="section-card-header">
-        <h3>{table_title}</h3>
+        <h3>{map_title_curr}</h3>
         <div class="legend">
-            <span>Sorted by rain prob.</span>
+            <span><span class="dot" style="background:#1D9E75;"></span>Mod</span>
+            <span><span class="dot" style="background:#EF9F27;"></span>Heavy</span>
+            <span><span class="dot" style="background:#E24B4A;"></span>V.Heavy</span>
         </div>
     </div>
     """, unsafe_allow_html=True)
-    render_table(data, level=level)
+    render_map(data, level=level, map_type="current")
 
 # ── 3-Day Forecast — FLAT DISPLAY (FEAT-03) ──────────────────────────
 # Date range for header
@@ -558,73 +557,75 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 if data:
-    # Group by region for organized display
+    # Group data by region
+    grouped = {}
+    for d in data:
+        reg = d.get("region", "Unknown")
+        grouped.setdefault(reg, []).append(d)
+
     region_order = ["Central", "Northern", "Northeastern", "Eastern", "Southern", "Western"]
     regions_in_data = [r for r in region_order if r in set(d.get("region", "") for d in data)]
-
-    # Determine the name key based on level
-    name_key = "district" if level == "district" else "province"
     count_label = "districts" if level == "district" else "provinces"
 
-    # Wrap entire section in a scrollable container
-    with st.container(height=700):
-        for region in regions_in_data:
-            region_data = sorted(
-                [d for d in data if d.get("region") == region],
-                key=lambda x: x.get("rain_probability", 0),
-                reverse=True,
-            )
-            dot_color = REGION_DOT_COLORS.get(region, "#888780")
+    for region in regions_in_data:
+        docs = grouped.get(region, [])
+        if not docs:
+            continue
+            
+        # Sort docs by highest rain prob today
+        docs_sorted = sorted(docs, key=lambda x: x.get("rain_probability", 0), reverse=True)
+        
+        with st.expander(f"{region} Region ({len(docs)} {count_label})"):
+            for d in docs_sorted:
+                loc_name = d.get("district") or d.get("province", "Unknown")
+                prob = d.get("rain_probability", 0)
+                emoji = get_rain_emoji(d.get("rain_level", ""))
+                
+                st.markdown(f"""
+                <div class="list-item">
+                    <span class="loc-name">{loc_name}</span>
+                    <span class="badge" style="background: rgba(255,255,255,0.05); color: #ccc;">
+                        Today: {emoji} {prob}%
+                    </span>
+                </div>
+                """, unsafe_allow_html=True)
 
-            # FEAT-03: Flat region header (no expander)
-            st.markdown(
-                f'<div class="region-header-flat">'
-                f'<span class="region-dot-flat" style="background:{dot_color};"></span>'
-                f'<span class="region-name">{region}</span>'
-                f'<span class="region-count">({len(region_data)} {count_label})</span>'
-                f'</div>',
-                unsafe_allow_html=True
-            )
-
-            # Display all locations directly — no click-to-expand
-            for doc in region_data:
-                forecast = doc.get("forecast_3_days", [])
-                location_name = doc.get(name_key, doc.get("province", "Unknown"))
-                rain_level = doc.get("rain_level", "")
-                rain_emoji = get_rain_emoji(rain_level)
-                rain_prob = doc.get("rain_probability", 0)
-
-                # In district mode, show province in parentheses
-                if level == "district":
-                    prov = doc.get("province", "")
-                    display_name = f"{location_name} ({prov})"
-                else:
-                    display_name = location_name
-
-                st.markdown(
-                    f"**{rain_emoji} {display_name}** &nbsp; "
-                    f"<span style='font-size:12px; color: var(--color-text-secondary);'>Today: {rain_level} ({rain_prob}%)</span>",
-                    unsafe_allow_html=True,
-                )
-
+                forecast = d.get("forecast_3_days", [])
                 if forecast:
                     fcols = st.columns(len(forecast))
                     for i, fc in enumerate(forecast):
-                        fc_emoji = get_rain_emoji(fc.get("level", ""))
+                        fc_level = fc.get("level", "")
+                        fc_emoji = get_rain_emoji(fc_level)
                         fc_date = fc.get("date", "")
-                        # Format date shorter (e.g., "Jun 22")
                         try:
                             from datetime import datetime
                             dt = datetime.strptime(fc_date, "%Y-%m-%d")
                             fc_date_short = dt.strftime("%b %d")
                         except Exception:
                             fc_date_short = fc_date
+                            
+                        # Dynamic color logic for cards
+                        if fc_level == "Very Heavy Rain":
+                            bg_color = "rgba(226, 75, 74, 0.15)"
+                            text_color = "var(--color-red)"
+                        elif fc_level == "Heavy Rain":
+                            bg_color = "rgba(239, 159, 39, 0.15)"
+                            text_color = "var(--color-amber)"
+                        elif fc_level == "Moderate Rain":
+                            bg_color = "rgba(16, 185, 129, 0.15)"
+                            text_color = "var(--color-teal)"
+                        elif fc_level == "Light Rain":
+                            bg_color = "rgba(113, 112, 255, 0.15)"
+                            text_color = "var(--color-info-blue)"
+                        else:
+                            bg_color = "rgba(255, 255, 255, 0.02)"
+                            text_color = "var(--color-text-primary)"
 
                         with fcols[i]:
                             st.markdown(f"""
-                            <div class="forecast-day-card">
+                            <div class="forecast-day-card" style="background: {bg_color}; border-color: {bg_color};">
                                 <p class="day-label">Day+{i+1} · {fc_date_short}</p>
-                                <p class="day-value">{fc_emoji} {fc.get('level', '')} ({fc.get('rain_prob', 0)}%)</p>
+                                <p class="day-value" style="color: {text_color};">{fc_emoji} {fc_level} ({fc.get('rain_prob', 0)}%)</p>
                             </div>
                             """, unsafe_allow_html=True)
                 st.divider()
