@@ -1,6 +1,7 @@
 """
 Data table component with colour-highlighted rain probability cells.
 Fixed: uses .map() instead of .applymap() for pandas >= 2.1 compatibility.
+FEAT-01: Supports district column when level="district".
 """
 
 import pandas as pd
@@ -35,11 +36,12 @@ def _rain_level_badge(val):
     return styles.get(val, "")
 
 
-def render_table(data: list[dict]):
-    """Render the province data table with coloured rain probability cells.
+def render_table(data: list[dict], level: str = "province"):
+    """Render the data table with coloured rain probability cells.
 
     Args:
         data: List of forecast dicts.
+        level: "province" | "district" — controls which columns to show.
     """
     if not data:
         st.info("📊 No data to display in table. Adjust your filters or select a different date.")
@@ -52,16 +54,21 @@ def render_table(data: list[dict]):
     rows = []
     for doc in sorted_data:
         forecast = doc.get("forecast_3_days", [])
-        row = {
-            "Province": doc.get("province", ""),
-            "Region": doc.get("region", ""),
-            "Prob %": doc.get("rain_probability", 0),
-            "Rain Level": doc.get("rain_level", ""),
-            "Volume (mm)": round(doc.get("rain_volume_mm", 0), 1),
-            "D+1": forecast[0]["rain_prob"] if len(forecast) > 0 else "—",
-            "D+2": forecast[1]["rain_prob"] if len(forecast) > 1 else "—",
-            "D+3": forecast[2]["rain_prob"] if len(forecast) > 2 else "—",
-        }
+        row = {}
+
+        # Add District column first when in district mode
+        if level == "district":
+            row["District"] = doc.get("district", "")
+
+        row["Province"] = doc.get("province", "")
+        row["Region"] = doc.get("region", "")
+        row["Prob %"] = doc.get("rain_probability", 0)
+        row["Rain Level"] = doc.get("rain_level", "")
+        row["Volume (mm)"] = round(doc.get("rain_volume_mm", 0), 1)
+        row["D+1"] = forecast[0]["rain_prob"] if len(forecast) > 0 else "—"
+        row["D+2"] = forecast[1]["rain_prob"] if len(forecast) > 1 else "—"
+        row["D+3"] = forecast[2]["rain_prob"] if len(forecast) > 2 else "—"
+
         rows.append(row)
 
     df = pd.DataFrame(rows)

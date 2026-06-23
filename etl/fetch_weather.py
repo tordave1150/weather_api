@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
-Daily ETL — fetch Open-Meteo forecasts for all 77 Thai provinces → upsert MongoDB.
+Daily ETL — fetch Open-Meteo forecasts for Thai provinces/districts → upsert MongoDB.
 
 Spec: OPEN_METEO_FETCH.md sections 7, 9
 
 Usage:
-    python etl/fetch_weather.py                    # default: morning round
-    python etl/fetch_weather.py --round afternoon  # afternoon refresh
+    python etl/fetch_weather.py                                # province, morning
+    python etl/fetch_weather.py --round afternoon              # province, afternoon
+    python etl/fetch_weather.py --level district               # district, morning
+    python etl/fetch_weather.py --level district --round afternoon
 
 Cron schedule (UTC):
     0 22 * * *   python etl/fetch_weather.py --round morning    (= 05:00 Bangkok)
@@ -29,6 +31,7 @@ from pymongo import MongoClient
 # ── Path setup ────────────────────────────────────────────────────────────────
 ROOT           = Path(__file__).parents[1]
 PROVINCES_PATH = ROOT / "data/provinces.json"
+DISTRICTS_PATH = ROOT / "data/districts.json"
 
 
 # ── SECRETS loading (env vars first, fall back to secrets.toml) ───────────────
@@ -70,21 +73,28 @@ def get_collection():
 
 
 def upsert_all(collection, docs: list[dict]) -> int:
-    """Upsert all forecast documents, keyed by (date, province).
+    """Upsert all forecast documents, keyed by (date, province/district, level).
 
     Spec: OPEN_METEO_FETCH.md section 7 — afternoon round overwrites morning
     """
     success = 0
     for doc in docs:
         try:
+            level = doc.get("level", "province")
+            if level == "district" and "district" in doc:
+                key = {"date": doc["date"], "district": doc["district"], "level": level}
+            else:
+                key = {"date": doc["date"], "province": doc["province"], "level": level}
+
             collection.update_one(
-                filter={"date": doc["date"], "province": doc["province"]},
+                filter=key,
                 update={"$set": doc},
                 upsert=True,
             )
             success += 1
         except Exception as e:
-            print(f"  Upsert failed for {doc['province']}: {e}")
+            label = doc.get("district", doc.get("province", "?"))
+            print(f"  Upsert failed for {label}: {e}")
     return success
 
 
@@ -96,19 +106,29 @@ def main():
         default="morning",
         help="Fetch round: morning (05:00 BKK) or afternoon (13:00 BKK)"
     )
+    parser.add_argument(
+        "--level",
+        choices=["province", "district"],
+        default="province",
+        help="Granularity level: province (77 locations) or district (~913 locations)"
+    )
     args = parser.parse_args()
 
     print(f"\n{'='*55}")
-    print(f"Weather ETL -- {args.round.upper()} ROUND")
+    print(f"Weather ETL -- {args.round.upper()} ROUND -- {args.level.upper()} LEVEL")
     print(f"{datetime.now(tz=TZ_BANGKOK).strftime('%Y-%m-%d %H:%M:%S')} (Bangkok)")
     print(f"{'='*55}\n")
 
-    # Load province list
-    provinces = json.loads(PROVINCES_PATH.read_text(encoding="utf-8"))
-    print(f"Loaded {len(provinces)} provinces\n")
+    # Load location list based on level
+    if args.level == "district":
+        locations = json.loads(DISTRICTS_PATH.read_text(encoding="utf-8"))
+        print(f"Loaded {len(locations)} districts\n")
+    else:
+        locations = json.loads(PROVINCES_PATH.read_text(encoding="utf-8"))
+        print(f"Loaded {len(locations)} provinces\n")
 
     # Fetch from Open-Meteo (free tier — no API key)
-    docs = fetch_all_provinces(provinces, fetch_round=args.round)
+    docs = fetch_all_provinces(locations, fetch_round=args.round, level=args.level)
 
     if not docs:
         print("No data fetched. Check network or Open-Meteo API status.")
@@ -120,8 +140,9 @@ def main():
     saved = upsert_all(collection, docs)
 
     date_label = docs[0]["date"] if docs else "unknown"
+    level_label = "districts" if args.level == "district" else "provinces"
     print(f"\n{'='*55}")
-    print(f"Done: {saved}/{len(docs)} saved  |  Date: {date_label}")
+    print(f"Done: {saved}/{len(docs)} {level_label} saved  |  Date: {date_label}")
     print(f"{'='*55}\n")
 
 

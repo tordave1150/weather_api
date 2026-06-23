@@ -1,70 +1,106 @@
 """
-Map view component — pydeck ScatterplotLayer for province rain data.
-Updated to match redesign spec: new dot colors, light map style.
+Map view component — pydeck GeoJsonLayer choropleth for province rain data.
+FEAT-02: Replaces ScatterplotLayer with colored province polygons.
 """
+
+import json
+import pathlib
 
 import streamlit as st
 import pydeck as pdk
 
 
-# Color mapping from spec Section 3.5: rain_level → RGBA
+# Color mapping: rain_level → RGBA (higher alpha for choropleth visibility)
 RAIN_COLORS = {
-    "No Rain":         [150, 150, 150, 140],     # gray
+    "No Rain":         [150, 150, 150, 100],     # gray
     "Light Rain":      [29, 158, 117, 160],       # teal
     "Moderate Rain":   [29, 158, 117, 200],       # teal #1D9E75
     "Heavy Rain":      [239, 159, 39, 220],       # amber #EF9F27
     "Very Heavy Rain": [226, 75, 74, 240],        # red #E24B4A
 }
 
+# Default color for provinces with no data
+NO_DATA_COLOR = [40, 40, 40, 80]
+
+
+@st.cache_data
+def _load_geojson():
+    """Load and return Thailand province boundaries GeoJSON (cached)."""
+    path = pathlib.Path(__file__).resolve().parent.parent.parent / "data" / "thailand_provinces.geojson"
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+@st.cache_data
+def _load_name_map():
+    """Load GeoJSON → provinces.json name mapping (cached)."""
+    path = pathlib.Path(__file__).resolve().parent.parent.parent / "data" / "province_name_map.json"
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
 
 def render_map(data: list[dict]):
-    """Render a pydeck ScatterplotLayer map of province weather data.
+    """Render a pydeck GeoJsonLayer choropleth map of province weather data.
 
     Args:
-        data: List of forecast dicts with lat, lon, rain_probability, rain_level, etc.
+        data: List of forecast dicts with province, rain_probability, rain_level, etc.
     """
     if not data:
         st.info("📍 No data to display on map. Adjust your filters or select a different date.")
         return
 
-    # Enrich each record with color and radius for pydeck
-    map_data = []
-    for doc in data:
-        color = RAIN_COLORS.get(doc.get("rain_level", "No Rain"), [150, 150, 150, 150])
-        # Smaller, cleaner dots — radius based on rain level
-        level = doc.get("rain_level", "No Rain")
-        if level == "Very Heavy Rain":
-            radius = 12000
-        elif level == "Heavy Rain":
-            radius = 10000
-        elif level == "Moderate Rain":
-            radius = 8000
-        else:
-            radius = 6000
+    # Build lookup dicts from forecast data
+    level_map = {d["province"]: d.get("rain_level", "No Rain") for d in data}
+    prob_map  = {d["province"]: d.get("rain_probability", 0) for d in data}
+    vol_map   = {d["province"]: d.get("rain_volume_mm", 0) for d in data}
 
-        map_data.append({
-            "lat": doc.get("lat", doc.get("latitude", 13.7563)),
-            "lon": doc.get("lon", doc.get("longitude", 100.5018)),
-            "province": doc.get("province", ""),
-            "region": doc.get("region", ""),
-            "rain_probability": doc.get("rain_probability", 0),
-            "rain_level": doc.get("rain_level", ""),
-            "rain_volume_mm": doc.get("rain_volume_mm", 0),
-            "color": color,
-            "radius": radius,
-        })
+    # Load GeoJSON and name mapping
+    geojson = _load_geojson()
+    name_map = _load_name_map()
+
+    # Deep copy features to avoid mutating cached data
+    import copy
+    geojson_copy = copy.deepcopy(geojson)
+
+    # Inject fill_color into each feature based on rain data
+    for feature in geojson_copy["features"]:
+        geo_name = feature["properties"].get("NAME_1", "")
+
+        # Skip lake/water features
+        if "Lake" in geo_name:
+            feature["properties"]["fill_color"] = [0, 0, 0, 0]
+            feature["properties"]["rain_level"] = ""
+            feature["properties"]["rain_probability"] = ""
+            feature["properties"]["rain_volume_mm"] = ""
+            feature["properties"]["province_name"] = ""
+            continue
+
+        # Map GeoJSON name to canonical province name
+        prov_name = name_map.get(geo_name, geo_name)
+
+        rain_level = level_map.get(prov_name, None)
+        if rain_level is not None:
+            color = RAIN_COLORS.get(rain_level, NO_DATA_COLOR)
+        else:
+            # Province not in filtered data → show as gray
+            color = NO_DATA_COLOR
+            rain_level = "No Data"
+
+        feature["properties"]["fill_color"] = color
+        feature["properties"]["rain_level"] = rain_level
+        feature["properties"]["rain_probability"] = prob_map.get(prov_name, "—")
+        feature["properties"]["rain_volume_mm"] = round(vol_map.get(prov_name, 0), 1)
+        feature["properties"]["province_name"] = prov_name
 
     layer = pdk.Layer(
-        "ScatterplotLayer",
-        data=map_data,
-        get_position=["lon", "lat"],
-        get_radius="radius",
-        get_fill_color="color",
-        pickable=True,
-        opacity=0.8,
-        stroked=True,
-        get_line_color=[255, 255, 255, 60],
+        "GeoJsonLayer",
+        data=geojson_copy,
+        get_fill_color="properties.fill_color",
+        get_line_color=[255, 255, 255, 40],
         line_width_min_pixels=1,
+        pickable=True,
+        opacity=0.75,
+        stroked=True,
     )
 
     # Center on Thailand
@@ -77,10 +113,9 @@ def render_map(data: list[dict]):
 
     tooltip = {
         "html": (
-            "<b>{province}</b><br/>"
-            "Region: {region}<br/>"
-            "Rain Probability: {rain_probability}%<br/>"
+            "<b>{province_name}</b><br/>"
             "Rain Level: {rain_level}<br/>"
+            "Rain Probability: {rain_probability}%<br/>"
             "Volume: {rain_volume_mm} mm"
         ),
         "style": {

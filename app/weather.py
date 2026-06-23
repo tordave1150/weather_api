@@ -74,15 +74,17 @@ def parse_wmo(code: int) -> tuple[str, str, str]:
     return WMO_MAP.get(int(code), ("Unknown", "❓", "none"))
 
 
-def fetch_province_forecast(province: dict, fetch_round: str = "morning") -> dict | None:
-    """Fetch 4-day daily forecast + current conditions for one province.
+def fetch_province_forecast(province: dict, fetch_round: str = "morning",
+                            level: str = "province") -> dict | None:
+    """Fetch 4-day daily forecast + current conditions for one location.
 
     Uses the Open-Meteo free tier (no API key).
     Spec: OPEN_METEO_FETCH.md section 8
 
     Args:
-        province: {"province": str, "region": str, "lat": float, "lon": float}
+        province: Dict with keys province, region, lat, lon and optionally district.
         fetch_round: "morning" | "afternoon" — stored in MongoDB doc for traceability
+        level: "province" | "district" — granularity level
 
     Returns:
         MongoDB document dict, or None on failure.
@@ -101,7 +103,8 @@ def fetch_province_forecast(province: dict, fetch_round: str = "morning") -> dic
         resp.raise_for_status()
         data = resp.json()
     except Exception as e:
-        print(f"  ❌ {province['province']}: {e}")
+        label = province.get("district", province["province"])
+        print(f"  ❌ {label}: {e}")
         return None
 
     daily   = data["daily"]
@@ -132,8 +135,9 @@ def fetch_province_forecast(province: dict, fetch_round: str = "morning") -> dic
             "weather_code":         wmo,
         })
 
-    return {
+    doc = {
         "date":             today,
+        "level":            level,
         "region":           province["region"],
         "province":         province["province"],
 
@@ -162,29 +166,39 @@ def fetch_province_forecast(province: dict, fetch_round: str = "morning") -> dic
         "logged_at":        datetime.now(tz=TZ_BANGKOK).isoformat(),
     }
 
+    # Add district field when operating at district level
+    if level == "district" and "district" in province:
+        doc["district"] = province["district"]
+
+    return doc
+
 
 def fetch_all_provinces(provinces: list[dict], fetch_round: str = "morning",
-                        sleep_sec: float = 0.15) -> list[dict]:
-    """Fetch forecasts for all provinces sequentially.
+                        sleep_sec: float = 0.15,
+                        level: str = "province") -> list[dict]:
+    """Fetch forecasts for all locations sequentially.
 
-    sleep_sec=0.15 → 77 provinces ≈ 12 seconds
+    sleep_sec=0.15 → 77 provinces ≈ 12 seconds, 913 districts ≈ 2.3 minutes
     Safe for free tier rate limit (600 calls/min = max 10 calls/sec)
     Spec: OPEN_METEO_FETCH.md section 8
 
     Args:
-        provinces: List of province dicts.
+        provinces: List of location dicts (province or district).
         fetch_round: "morning" | "afternoon"
         sleep_sec: Delay between requests (default 0.15s)
+        level: "province" | "district" — granularity level
 
     Returns:
         List of successfully fetched forecast dicts.
     """
     results = []
     total   = len(provinces)
+    label_key = "district" if level == "district" else "province"
 
     for i, prov in enumerate(provinces, 1):
-        print(f"  [{i:02d}/{total}] {prov['province']} ...", end=" ", flush=True)
-        doc = fetch_province_forecast(prov, fetch_round)
+        label = prov.get(label_key, prov.get("province", "Unknown"))
+        print(f"  [{i:03d}/{total}] {label} ...", end=" ", flush=True)
+        doc = fetch_province_forecast(prov, fetch_round, level=level)
         if doc:
             results.append(doc)
             print(f"OK  rain={doc['rain_probability']}%  [{doc['weather_risk']}]")
@@ -192,5 +206,6 @@ def fetch_all_provinces(provinces: list[dict], fetch_round: str = "morning",
             print("FAILED")
         time.sleep(sleep_sec)
 
-    print(f"\nFetched {len(results)}/{total} provinces ({fetch_round} round)")
+    level_label = "districts" if level == "district" else "provinces"
+    print(f"\nFetched {len(results)}/{total} {level_label} ({fetch_round} round)")
     return results

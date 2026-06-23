@@ -99,19 +99,6 @@ st.markdown("""
     color: var(--color-text-primary) !important;
 }
 
-/* ── Expander (accordion) ── */
-[data-testid="stExpander"] {
-    background: rgba(255, 255, 255, 0.02) !important;
-    border: 1px solid var(--color-border-tertiary) !important;
-    border-radius: 8px !important;
-    margin-bottom: 8px !important;
-}
-[data-testid="stExpander"] summary {
-    font-size: 14px !important;
-    font-weight: 500 !important;
-    color: var(--color-text-primary) !important;
-}
-
 /* ── Dataframe table ── */
 [data-testid="stDataFrame"] th {
     font-size: 12px !important;
@@ -293,6 +280,33 @@ st.markdown("""
     margin-right: 6px;
     vertical-align: middle;
 }
+
+/* ── FEAT-03: Region header (flat display) ── */
+.region-header-flat {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 16px 0 8px 0;
+    padding: 10px 16px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--color-border-tertiary);
+    border-radius: 8px;
+}
+.region-header-flat .region-dot-flat {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+}
+.region-header-flat .region-name {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--color-text-primary);
+}
+.region-header-flat .region-count {
+    font-size: 12px;
+    color: var(--color-text-tertiary);
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -333,7 +347,7 @@ REGION_DOT_COLORS = {
 }
 
 
-# ── Load province lat/lon for map enrichment ──────────────────────────
+# ── Load province/district coords for enrichment ─────────────────────
 @st.cache_data
 def load_provinces():
     """Load the static provinces.json for lat/lon coordinates."""
@@ -343,7 +357,19 @@ def load_provinces():
     return {p["province"]: p for p in provinces}
 
 
+@st.cache_data
+def load_districts():
+    """Load the static districts.json for lat/lon coordinates."""
+    path = pathlib.Path(__file__).resolve().parent.parent / "data" / "districts.json"
+    if not path.exists():
+        return {}
+    with open(path, "r", encoding="utf-8") as f:
+        districts = json.load(f)
+    return {d["district"]: d for d in districts}
+
+
 province_coords = load_provinces()
+district_coords = load_districts()
 
 # ── MongoDB Connection ────────────────────────────────────────────────
 try:
@@ -359,7 +385,8 @@ except Exception as e:
 # ── Sidebar Filters ───────────────────────────────────────────────────
 try:
     available_provinces = sorted(list(province_coords.keys()))
-    filters = render_sidebar(collection, available_provinces)
+    available_districts = sorted(list(district_coords.keys()))
+    filters = render_sidebar(collection, available_provinces, available_districts)
 except Exception as e:
     st.error(
         "🔒 **MongoDB authentication failed.** The database rejected the credentials.\n\n"
@@ -373,30 +400,55 @@ selected_date = filters["selected_date"]
 selected_regions = filters["regions"]
 selected_rain_levels = filters["rain_levels"]
 province_search = filters.get("province_search", "")
+level = filters.get("level", "province")
+selected_province = filters.get("selected_province")
 
 # ── Fetch Data ────────────────────────────────────────────────────────
-raw_data = get_forecasts(collection, selected_date, selected_regions if selected_regions else None)
+raw_data = get_forecasts(
+    collection, selected_date,
+    selected_regions if selected_regions else None,
+    level=level,
+)
 
 # Apply filters client-side
 data = raw_data
 if selected_rain_levels:
     data = [d for d in data if d.get("rain_level") in selected_rain_levels]
+
+# Province scope filter (district mode)
+if level == "district" and selected_province:
+    data = [d for d in data if d.get("province") == selected_province]
+
+# Text search filter
 if province_search:
     search_lower = province_search.lower()
-    data = [d for d in data if search_lower in d.get("province", "").lower()]
+    if level == "district":
+        data = [d for d in data if search_lower in d.get("district", "").lower()]
+    else:
+        data = [d for d in data if search_lower in d.get("province", "").lower()]
 
-# Enrich with lat/lon from provinces.json (in case MongoDB docs don't have them)
+# Enrich with lat/lon from static data (in case MongoDB docs don't have them)
 for doc in data:
-    prov_name = doc.get("province", "")
-    if prov_name in province_coords:
-        doc["lat"] = province_coords[prov_name]["lat"]
-        doc["lon"] = province_coords[prov_name]["lon"]
+    if level == "district":
+        dist_name = doc.get("district", "")
+        if dist_name in district_coords:
+            doc["lat"] = district_coords[dist_name]["lat"]
+            doc["lon"] = district_coords[dist_name]["lon"]
+    else:
+        prov_name = doc.get("province", "")
+        if prov_name in province_coords:
+            doc["lat"] = province_coords[prov_name]["lat"]
+            doc["lon"] = province_coords[prov_name]["lon"]
 
 # ── KPI calculations ─────────────────────────────────────────────────
-total_provinces = len(data)
+total_locations = len(data)
 high_rain = sum(1 for d in data if d.get("rain_probability", 0) >= 40)
 very_heavy = sum(1 for d in data if d.get("rain_level") == "Very Heavy Rain")
-avg_prob = round(sum(d.get("rain_probability", 0) for d in data) / max(total_provinces, 1), 1)
+avg_prob = round(sum(d.get("rain_probability", 0) for d in data) / max(total_locations, 1), 1)
+
+# Level-aware labels
+location_label = "Districts" if level == "district" else "Provinces"
+location_label_lower = "districts" if level == "district" else "provinces"
 
 # ── Refresh time extraction ──────────────────────────────────────────
 _refresh_time = "—"
@@ -417,12 +469,13 @@ if data:
 _round_label = f' · {_fetch_round.capitalize()} round' if _fetch_round else ""
 
 # ── Hero Banner ───────────────────────────────────────────────────────
+eyebrow_text = "Thailand District Weather Forecast" if level == "district" else "Thailand Provincial Weather Forecast"
 st.markdown(f"""
 <div class="hero-banner">
     <div class="hero-left">
-        <p class="eyebrow">Thailand Provincial Weather Forecast</p>
+        <p class="eyebrow">{eyebrow_text}</p>
         <h1>⛈ Weather Advisor</h1>
-        <p class="hero-sub">{total_provinces} provinces displayed · Data updated daily from Open-Meteo</p>
+        <p class="hero-sub">{total_locations} {location_label_lower} displayed · Data updated daily from Open-Meteo</p>
     </div>
     <div class="date-badge">
         <p>Data Date</p>
@@ -438,7 +491,7 @@ st.markdown(f"""
 if very_heavy >= 10:
     st.markdown(f"""
     <div class="alert-bar">
-        ⚠️ <strong>Heavy rain advisory:</strong> {very_heavy} provinces are currently forecasting Very Heavy Rain — plan outdoor activities accordingly.
+        ⚠️ <strong>Heavy rain advisory:</strong> {very_heavy} {location_label_lower} are currently forecasting Very Heavy Rain — plan outdoor activities accordingly.
     </div>
     """, unsafe_allow_html=True)
 
@@ -446,7 +499,7 @@ if very_heavy >= 10:
 kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 
 with kpi1:
-    st.metric("Total Provinces", total_provinces)
+    st.metric(f"Total {location_label}", total_locations)
     st.markdown('<p class="metric-sub">All regions included</p>', unsafe_allow_html=True)
 with kpi2:
     st.metric("High Rain Zones", high_rain)
@@ -456,16 +509,17 @@ with kpi3:
     st.markdown('<p class="metric-sub">Exceeds 35 mm/day</p>', unsafe_allow_html=True)
 with kpi4:
     st.metric("Avg Rain Probability", f"{avg_prob}%")
-    st.markdown(f'<p class="metric-sub">Across all {total_provinces} provinces</p>', unsafe_allow_html=True)
+    st.markdown(f'<p class="metric-sub">Across all {total_locations} {location_label_lower}</p>', unsafe_allow_html=True)
 
 # ── Map + Table Side-by-Side ──────────────────────────────────────────
 col_map, col_table = st.columns(2)
 
 with col_map:
     # Map card header with legend
-    st.markdown("""
+    map_title = "🗺️ Rain Map (Choropleth)"
+    st.markdown(f"""
     <div class="section-card-header">
-        <h3>🗺️ Province Rain Map</h3>
+        <h3>{map_title}</h3>
         <div class="legend">
             <span><span class="dot" style="background:#1D9E75;"></span>Moderate</span>
             <span><span class="dot" style="background:#EF9F27;"></span>Heavy</span>
@@ -477,17 +531,18 @@ with col_map:
 
 with col_table:
     # Table card header
-    st.markdown("""
+    table_title = f"📋 {location_label} Forecast Data"
+    st.markdown(f"""
     <div class="section-card-header">
-        <h3>📋 Province Forecast Data</h3>
+        <h3>{table_title}</h3>
         <div class="legend">
             <span>Sorted by rain prob.</span>
         </div>
     </div>
     """, unsafe_allow_html=True)
-    render_table(data)
+    render_table(data, level=level)
 
-# ── 3-Day Forecast Accordion ─────────────────────────────────────────
+# ── 3-Day Forecast — FLAT DISPLAY (FEAT-03) ──────────────────────────
 # Date range for header
 if data and data[0].get("forecast_3_days"):
     fc_dates = [fc.get("date", "") for fc in data[0]["forecast_3_days"]]
@@ -507,24 +562,47 @@ if data:
     region_order = ["Central", "Northern", "Northeastern", "Eastern", "Southern", "Western"]
     regions_in_data = [r for r in region_order if r in set(d.get("region", "") for d in data)]
 
-    for region in regions_in_data:
-        region_data = sorted(
-            [d for d in data if d.get("region") == region],
-            key=lambda x: x.get("rain_probability", 0),
-            reverse=True,
-        )
-        dot_color = REGION_DOT_COLORS.get(region, "#888780")
+    # Determine the name key based on level
+    name_key = "district" if level == "district" else "province"
+    count_label = "districts" if level == "district" else "provinces"
 
-        with st.expander(f"● {region}                                                      {len(region_data)} provinces", expanded=(region == regions_in_data[0])):
+    # Wrap entire section in a scrollable container
+    with st.container(height=700):
+        for region in regions_in_data:
+            region_data = sorted(
+                [d for d in data if d.get("region") == region],
+                key=lambda x: x.get("rain_probability", 0),
+                reverse=True,
+            )
+            dot_color = REGION_DOT_COLORS.get(region, "#888780")
+
+            # FEAT-03: Flat region header (no expander)
+            st.markdown(
+                f'<div class="region-header-flat">'
+                f'<span class="region-dot-flat" style="background:{dot_color};"></span>'
+                f'<span class="region-name">{region}</span>'
+                f'<span class="region-count">({len(region_data)} {count_label})</span>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+
+            # Display all locations directly — no click-to-expand
             for doc in region_data:
                 forecast = doc.get("forecast_3_days", [])
-                province_name = doc.get("province", "Unknown")
+                location_name = doc.get(name_key, doc.get("province", "Unknown"))
                 rain_level = doc.get("rain_level", "")
                 rain_emoji = get_rain_emoji(rain_level)
                 rain_prob = doc.get("rain_probability", 0)
 
+                # In district mode, show province in parentheses
+                if level == "district":
+                    prov = doc.get("province", "")
+                    display_name = f"{location_name} ({prov})"
+                else:
+                    display_name = location_name
+
                 st.markdown(
-                    f"**{rain_emoji} {province_name}** &nbsp; "
+                    f"**{rain_emoji} {display_name}** &nbsp; "
                     f"<span style='font-size:12px; color: var(--color-text-secondary);'>Today: {rain_level} ({rain_prob}%)</span>",
                     unsafe_allow_html=True,
                 )
@@ -554,7 +632,7 @@ else:
     st.info("No forecast data available. Run the ETL script first: `python etl/fetch_weather.py`")
 
 # ── Export Buttons (sidebar) ──────────────────────────────────────────
-render_export(data, selected_date)
+render_export(data, selected_date, level=level)
 
 # ── Footer ────────────────────────────────────────────────────────────
 st.markdown("---")

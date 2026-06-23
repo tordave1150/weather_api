@@ -19,6 +19,14 @@ on:
         options:
           - morning
           - afternoon
+      level:
+        description: "Granularity level"
+        required: true
+        default: "province"
+        type: choice
+        options:
+          - province
+          - district
 
 jobs:
   fetch-weather:
@@ -52,9 +60,18 @@ jobs:
             fi
           fi
 
+      - name: Determine ETL level
+        id: level
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "value=${{ github.event.inputs.level }}" >> $GITHUB_OUTPUT
+          else
+            echo "value=province" >> $GITHUB_OUTPUT
+          fi
+
       - name: Run ETL
         env:
           MONGODB_URI:        ${{ secrets.MONGODB_URI }}
           MONGODB_DB_NAME:    ${{ secrets.MONGODB_DB_NAME }}
           MONGODB_COLLECTION: ${{ secrets.MONGODB_COLLECTION }}
-        run: python etl/fetch_weather.py --round ${{ steps.round.outputs.value }}
+        run: python etl/fetch_weather.py --round ${{ steps.round.outputs.value }} --level ${{ steps.level.outputs.value }}

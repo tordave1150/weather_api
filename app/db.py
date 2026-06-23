@@ -18,7 +18,7 @@ def get_db():
 
 
 def upsert_forecast(collection, doc: dict):
-    """Insert or replace a document for (date, province).
+    """Insert or replace a document keyed by (date, province/district, level).
 
     Used by the ETL script only — the dashboard is read-only.
 
@@ -26,28 +26,40 @@ def upsert_forecast(collection, doc: dict):
         collection: PyMongo collection object.
         doc: Forecast document dict.
     """
+    level = doc.get("level", "province")
+    if level == "district" and "district" in doc:
+        key = {"date": doc["date"], "district": doc["district"], "level": level}
+    else:
+        key = {"date": doc["date"], "province": doc["province"], "level": level}
+
     collection.update_one(
-        filter={"date": doc["date"], "province": doc["province"]},
+        filter=key,
         update={"$set": doc},
         upsert=True,
     )
 
 
-def get_forecasts(collection, date: str, regions: list[str] | None = None) -> list[dict]:
-    """Return all province docs for a given date, optionally filtered by region.
+def get_forecasts(collection, date: str, regions: list[str] | None = None,
+                  level: str = "province") -> list[dict]:
+    """Return all location docs for a given date, optionally filtered by region.
 
     Args:
         collection: PyMongo collection object.
         date: Date string in YYYY-MM-DD format.
         regions: Optional list of region names to filter by.
+        level: "province" | "district" — granularity level.
 
     Returns:
         List of forecast dicts (without _id field).
     """
     query = {"date": date}
+    # Only filter by level if the field exists in any document
+    # (backward-compatible with documents that pre-date the level field)
+    query["level"] = level
     if regions:
         query["region"] = {"$in": regions}
-    return list(collection.find(query, {"_id": 0}).sort("province", 1))
+    sort_key = "district" if level == "district" else "province"
+    return list(collection.find(query, {"_id": 0}).sort(sort_key, 1))
 
 
 def get_date_range(collection) -> tuple[str | None, str | None]:

@@ -12,15 +12,18 @@ ALL_REGIONS = ["Northern", "Northeastern", "Central", "Eastern", "Western", "Sou
 ALL_RAIN_LEVELS = ["No Rain", "Light Rain", "Moderate Rain", "Heavy Rain", "Very Heavy Rain"]
 
 
-def render_sidebar(collection, available_provinces: list[str]) -> dict:
+def render_sidebar(collection, available_provinces: list[str],
+                   available_districts: list[str] | None = None) -> dict:
     """Render sidebar filters and return selected filter values.
 
     Args:
         collection: PyMongo collection object.
         available_provinces: Sorted list of all province names.
+        available_districts: Sorted list of all district names (for district mode).
 
     Returns:
-        Dict with keys: 'selected_date', 'regions', 'rain_levels', 'province_search'.
+        Dict with keys: 'selected_date', 'regions', 'rain_levels',
+        'province_search', 'level', 'selected_province'.
     """
     with st.sidebar:
         # ── Logo row ──────────────────────────────────────────────────
@@ -36,6 +39,16 @@ def render_sidebar(collection, available_provinces: list[str]) -> dict:
             <span style="font-size:14px; font-weight:500; color:var(--color-text-primary, #E8E6DE);">Weather Advisor</span>
         </div>
         """, unsafe_allow_html=True)
+
+        # ── Granularity toggle (FEAT-01) ─────────────────────────────
+        st.markdown('<p style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:#6B6A63; margin-bottom:4px;">GRANULARITY</p>', unsafe_allow_html=True)
+        level = st.radio(
+            "Granularity",
+            ["Province", "District"],
+            horizontal=True,
+            label_visibility="collapsed",
+        )
+        level_value = level.lower()  # "province" or "district"
 
         # ── Date picker ───────────────────────────────────────────────
         st.markdown('<p style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:#6B6A63; margin-bottom:4px;">DATE</p>', unsafe_allow_html=True)
@@ -74,17 +87,42 @@ def render_sidebar(collection, available_provinces: list[str]) -> dict:
             label_visibility="collapsed",
         )
 
-        # ── Province search ───────────────────────────────────────────
-        st.markdown('<p style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:#6B6A63; margin: 16px 0 4px 0;">PROVINCE</p>', unsafe_allow_html=True)
-        province_search = st.text_input(
-            "🔍 Filter province",
-            placeholder="Filter province...",
-            label_visibility="collapsed",
-        )
+        # ── Province / District filter ────────────────────────────────
+        selected_province = None
+        province_search = ""
+
+        if level_value == "district":
+            # In district mode: show province selector to scope districts
+            st.markdown('<p style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:#6B6A63; margin: 16px 0 4px 0;">PROVINCE (SCOPE)</p>', unsafe_allow_html=True)
+            selected_province = st.selectbox(
+                "🏛️ Province",
+                options=["All Provinces"] + available_provinces,
+                label_visibility="collapsed",
+            )
+            if selected_province == "All Provinces":
+                selected_province = None
+
+            # District search within selected province
+            st.markdown('<p style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:#6B6A63; margin: 16px 0 4px 0;">DISTRICT</p>', unsafe_allow_html=True)
+            province_search = st.text_input(
+                "🔍 Filter district",
+                placeholder="Filter district...",
+                label_visibility="collapsed",
+            )
+        else:
+            # In province mode: free-text search
+            st.markdown('<p style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:#6B6A63; margin: 16px 0 4px 0;">PROVINCE</p>', unsafe_allow_html=True)
+            province_search = st.text_input(
+                "🔍 Filter province",
+                placeholder="Filter province...",
+                label_visibility="collapsed",
+            )
 
     return {
         "selected_date": selected_date.strftime("%Y-%m-%d") if isinstance(selected_date, date) else str(selected_date),
         "regions": regions,
         "rain_levels": rain_levels,
         "province_search": province_search,
+        "level": level_value,
+        "selected_province": selected_province,
     }

@@ -1,6 +1,7 @@
 """
 Export component — CSV and Excel download buttons for the sidebar.
 Styled with section label per redesign spec.
+FEAT-01: Includes district column when level="district".
 """
 
 import io
@@ -9,12 +10,13 @@ import pandas as pd
 import streamlit as st
 
 
-def render_export(data: list[dict], selected_date: str):
+def render_export(data: list[dict], selected_date: str, level: str = "province"):
     """Render CSV and Excel download buttons in the sidebar.
 
     Args:
         data: List of forecast dicts.
         selected_date: Date string (YYYY-MM-DD) for the filename.
+        level: "province" | "district" — controls which columns to export.
     """
     if not data:
         return
@@ -23,22 +25,30 @@ def render_export(data: list[dict], selected_date: str):
     rows = []
     for doc in data:
         forecast = doc.get("forecast_3_days", [])
-        row = {
-            "Province": doc.get("province", ""),
-            "Region": doc.get("region", ""),
-            "Rain Prob (%)": doc.get("rain_probability", 0),
-            "Rain Level": doc.get("rain_level", ""),
-            "Volume (mm)": doc.get("rain_volume_mm", 0),
-            "Day+1 Prob": forecast[0]["rain_prob"] if len(forecast) > 0 else "",
-            "Day+1 Level": forecast[0]["level"] if len(forecast) > 0 else "",
-            "Day+2 Prob": forecast[1]["rain_prob"] if len(forecast) > 1 else "",
-            "Day+2 Level": forecast[1]["level"] if len(forecast) > 1 else "",
-            "Day+3 Prob": forecast[2]["rain_prob"] if len(forecast) > 2 else "",
-            "Day+3 Level": forecast[2]["level"] if len(forecast) > 2 else "",
-        }
+        row = {}
+
+        # Add District column when in district mode
+        if level == "district":
+            row["District"] = doc.get("district", "")
+
+        row["Province"] = doc.get("province", "")
+        row["Region"] = doc.get("region", "")
+        row["Rain Prob (%)"] = doc.get("rain_probability", 0)
+        row["Rain Level"] = doc.get("rain_level", "")
+        row["Volume (mm)"] = doc.get("rain_volume_mm", 0)
+        row["Day+1 Prob"] = forecast[0]["rain_prob"] if len(forecast) > 0 else ""
+        row["Day+1 Level"] = forecast[0]["level"] if len(forecast) > 0 else ""
+        row["Day+2 Prob"] = forecast[1]["rain_prob"] if len(forecast) > 1 else ""
+        row["Day+2 Level"] = forecast[1]["level"] if len(forecast) > 1 else ""
+        row["Day+3 Prob"] = forecast[2]["rain_prob"] if len(forecast) > 2 else ""
+        row["Day+3 Level"] = forecast[2]["level"] if len(forecast) > 2 else ""
+
         rows.append(row)
 
     df = pd.DataFrame(rows)
+
+    # Filename includes level for clarity
+    level_suffix = f"_{level}" if level == "district" else ""
 
     with st.sidebar:
         st.markdown("---")
@@ -49,7 +59,7 @@ def render_export(data: list[dict], selected_date: str):
         st.download_button(
             label="📄 Export CSV",
             data=csv_data,
-            file_name=f"weather_audit_{selected_date}.csv",
+            file_name=f"weather_audit{level_suffix}_{selected_date}.csv",
             mime="text/csv",
         )
 
@@ -59,6 +69,6 @@ def render_export(data: list[dict], selected_date: str):
         st.download_button(
             label="📊 Export Excel",
             data=buffer.getvalue(),
-            file_name=f"weather_audit_{selected_date}.xlsx",
+            file_name=f"weather_audit{level_suffix}_{selected_date}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
