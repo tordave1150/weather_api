@@ -1,48 +1,42 @@
 # ⛈ Weather Advisor — Hyper-Local Thailand Weather Intelligence
 
-**Weather Advisor** is a professional, interactive weather dashboard built to support business operations, logistics, and risk management across Thailand. It provides hyper-local weather intelligence covering 77 provinces and over 900+ districts, empowering teams to track real-time conditions and predict weather impacts up to 3 days in advance.
+**Weather Advisor** is a professional, interactive weather dashboard built to support business operations, logistics, and risk management across Thailand. It provides hyper-local weather intelligence covering 77 provinces and over 900+ districts. It features both **Future Forecasts** and **Historical Analysis**, empowering teams to track real-time conditions, predict weather impacts up to 3 days in advance, and audit past weather events.
 
 ---
 
 ## 🌟 Key Business Value
 
-- **Hyper-Local Precision (District-Level):** Move beyond broad provincial data. Drill down into 913 specific districts to accurately plan logistics, agricultural activities, or outdoor operations.
-- **Real-Time vs. Predicted Validation:** Instantly compare the **Daily Predicted Risk** alongside the **Real-Time Current Rain** through intuitive side-by-side maps.
-- **Instant Risk Assessment:** A 3-day forward-looking forecast utilizing clear, traffic-light color coding (Green/Amber/Red) allows executives and operational teams to spot severe weather risks at a glance without reading complex data.
+- **Hyper-Local Precision (District-Level):** Move beyond broad provincial data. Drill down into 913 specific districts to accurately plan logistics, agricultural activities, or analyze past weather events.
+- **Dual Perspective:** Combine **3-Day Forward-Looking Forecasts** with **Historical Rain Auditing** to make well-rounded operational decisions.
+- **Visual Intelligence:** Intuitive UI with traffic-light color coding (Green/Amber/Red) for risks and side-by-side maps for instant gap analysis.
 - **Seamless Data Integration:** Filter data visually and export it directly to **CSV** or **Excel** with one click for easy integration into your existing Business Intelligence (BI) or reporting tools.
 
 ---
 
 ## 💻 Product Features & UI Overview
 
-```text
-┌─────────────────────────────────────────────────────────────┐
-│  Filters (Sidebar)         │   Executive Dashboard          │
-│  • Toggle: Province/Dist.  │   • KPIs & Alert Banners       │
-│  • Select Date             │   • Dual Map Views (Side-by-Side)│
-│  • Region Selection        │     - Daily Predicted Risk     │
-│  • Risk Level Filter       │     - Real-Time Rain Rate      │
-│  • Export (Excel/CSV)      │   • Color-Coded 3-Day Forecast │
-└─────────────────────────────────────────────────────────────┘
-```
+The application is divided into two primary dashboards:
 
-### 1. Executive KPIs & Alerts
-Top-level metrics give a rapid overview of the current national weather status. 
-- **High Rain Zones:** Counts areas with a rain probability over 40%.
-- **Very Heavy Rain:** Counts critical areas expecting severe storms.
-- **Automated Alerts:** A critical warning banner automatically appears if more than 10 locations are facing "Very Heavy Rain."
+### 1. 🌤 Weather Forecast Dashboard
+*Focus: Risk prevention and forward planning (Up to 3 Days)*
 
-### 2. Dual Map Analysis
-Two Choropleth maps rendered side-by-side for instant gap analysis:
-- 🗺️ **Predicted Daily Rain Map:** Colors areas based on the *maximum probability* of rain for the day. Excellent for forward planning.
-- 📡 **Current Rain Map (Latest Refresh):** Colors areas based on the *exact real-time rain volume (mm)* currently falling. Excellent for live operational tracking.
+- **Executive KPIs & Alerts:** Real-time counters for High Rain Zones and Very Heavy Rain. Automated warning banners appear if critical thresholds are met.
+- **Dual Map Analysis:** Two Choropleth maps rendered side-by-side.
+  - 🗺️ **Predicted Daily Rain Map:** Max probability of rain for the day.
+  - 📡 **Current Rain Map:** Real-time exact rain volume (mm) falling.
+- **Visual 3-Day Forecast:** Dynamic, color-coded timeline (Day+1, Day+2, Day+3) organized by region for rapid scanning.
 
-### 3. Visual 3-Day Forecast
-A comprehensive timeline organized by region. Instead of reading through data tables, Day+1, Day+2, and Day+3 cards are dynamically colored (Red for Severe, Amber for Heavy, Green for Moderate) so decision-makers can scan trends in seconds.
+### 2. 🌧 Historical Rain Report (Audit Dashboard)
+*Focus: Post-event analysis and claims validation*
+
+- **Historical Data Retrieval:** Select any past date and province to retrieve exact rain data (volume, temperature, wind speed, and hourly rain details).
+- **Live Data Fetching:** On-demand data fetching capability directly from the UI to backfill missing historical records.
+- **Top Impacted Areas:** Automatic Bar Chart highlighting the Top 15 areas with the highest rainfall volume.
+- **Detailed Data Grid:** Interactive table displaying comprehensive weather metrics, ready for export.
 
 ---
 
-## 🚦 Risk Level Classification
+## 🚦 Risk Level Classification (Forecasts)
 
 Weather Advisor automatically categorizes risk to simplify decision-making.
 
@@ -60,17 +54,11 @@ Weather Advisor automatically categorizes risk to simplify decision-making.
 
 The platform is designed to be highly automated and maintenance-free, leveraging modern cloud infrastructure.
 
-- **Data Source:** [Open-Meteo API](https://open-meteo.com/) (Free Tier).
-- **Automated ETL Pipeline:** A Python script (`etl/fetch_weather.py`) fetches, cleans, and structures data twice a day (5:00 AM and 1:00 PM ICT).
-- **Cloud Database:** MongoDB Atlas securely stores the historical and forecasted data.
+- **Data Source:** [Open-Meteo API](https://open-meteo.com/) (Free Tier) - specifically using the Forecast API and the Archive API for historical backfills.
+- **Automated ETL Pipeline:** Python scripts (`etl/fetch_weather.py` and `etl/backfill.py`) fetch, clean, and structure data.
+- **Cloud Database:** MongoDB Atlas securely stores the historical and forecasted data in separate collections.
 - **CI/CD Automation:** GitHub Actions automatically runs the ETL pipeline on a cron schedule without manual intervention.
-- **Frontend Framework:** Built on Streamlit, optimized for data applications.
-
-### 🔄 ETL Workflow (GitHub Actions)
-| Round | Local Time (ICT) | Purpose |
-|---|---|---|
-| **Morning** | 05:00 | Establishes the baseline prediction for the day's operations. |
-| **Afternoon** | 13:00 | Incorporates updated meteorological models to refine the afternoon/evening outlook. |
+- **Frontend Framework:** Built on Streamlit, leveraging a custom CSS design system (Linear-inspired dark theme).
 
 ---
 
@@ -84,7 +72,6 @@ The platform is designed to be highly automated and maintenance-free, leveraging
    [mongodb]
    uri        = "mongodb+srv://<user>:<password>@<cluster>.mongodb.net/"
    db_name    = "weather_db"
-   collection = "forecasts"
    ```
 4. Run the application: 
    ```bash
@@ -93,11 +80,11 @@ The platform is designed to be highly automated and maintenance-free, leveraging
 
 ### Running the ETL Manually
 ```bash
-# Fetch province-level data
+# Fetch live forecast data (province-level)
 python etl/fetch_weather.py --level province
 
-# Fetch district-level data (takes longer due to 900+ locations)
-python etl/fetch_weather.py --level district
+# Fetch historical data for the last 7 days (district-level)
+python etl/backfill.py --level district --days 7
 ```
 
 *Note: When deploying or running ETL via CI/CD (like GitHub Actions), ensure that the MongoDB Atlas Network Access allows connections from `0.0.0.0/0` as CI runners use dynamic IP addresses.*

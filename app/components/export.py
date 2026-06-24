@@ -55,7 +55,7 @@ def render_export(data: list[dict], selected_date: str, level: str = "province")
         st.markdown('<p style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:#6B6A63; margin-bottom:8px;">EXPORT DATA</p>', unsafe_allow_html=True)
 
         # ── CSV download ──────────────────────────────────────────────
-        csv_data = df.to_csv(index=False).encode("utf-8")
+        csv_data = df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
         st.download_button(
             label="📄 Export CSV",
             data=csv_data,

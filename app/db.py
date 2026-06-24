@@ -2,8 +2,14 @@
 MongoDB connection and query helpers for the Weather Advisor.
 """
 
+import pandas as pd
 import streamlit as st
 from pymongo import MongoClient
+
+
+@st.cache_resource
+def get_client():
+    return MongoClient(st.secrets["mongodb"]["uri"])
 
 
 @st.cache_resource
@@ -12,7 +18,7 @@ def get_db():
 
     Uses st.secrets for connection details — never hard-code credentials.
     """
-    client = MongoClient(st.secrets["mongodb"]["uri"])
+    client = get_client()
     db = client[st.secrets["mongodb"]["db_name"]]
     return db[st.secrets["mongodb"]["collection"]]
 
@@ -78,3 +84,44 @@ def get_date_range(collection) -> tuple[str | None, str | None]:
     if result:
         return result[0]["min"], result[0]["max"]
     return None, None
+
+
+def get_historical_rain(
+    selected_date,
+    province: str = None,
+    hour: int = None,
+) -> pd.DataFrame:
+    """
+    Query ข้อมูลฝนจริงรายอำเภอจาก MongoDB
+    
+    ปัจจุบัน collection หลัก (weather_forecast) เก็บระดับจังหวัด
+    ถ้ามี collection แยกสำหรับอำเภอให้ใช้ collection นั้นแทน
+    ถ้ายังไม่มี — function นี้จะ fallback ไปใช้ collection จังหวัดก่อน
+    แล้วค่อย migrate ทีหลังเมื่อ district-level data พร้อม
+    """
+    client = get_client()
+    db = client[st.secrets["mongodb"]["db_name"]]
+    
+    # ดึงจาก collection weather_historical ที่ได้จาก backfill script
+    col = db["weather_historical"]
+
+    query = {"date": str(selected_date)}
+    if province:
+        query["province"] = province
+
+    # ถ้ามีการระบุชั่วโมง เราต้องหาเอกสารที่มีชั่วโมงนั้นอยู่ใน rainy_hours_detail
+    # rainy_hours_detail หน้าตาเป็นแบบนี้: ["05:00 (1.2mm)", "14:00 (3.4mm)"]
+    if hour is not None:
+        hour_prefix = f"{hour:02d}:00"
+        # query แบบ Regex หรือ text match ใน array
+        query["rainy_hours_detail"] = {"$regex": f"^{hour_prefix}"}
+
+    docs = list(col.find(query, {"_id": 0}))
+    df = pd.DataFrame(docs)
+    
+    # ถ้า collection ระดับจังหวัดยังไม่มี district field ให้ใส่ placeholder
+    if not df.empty and "district" not in df.columns:
+        df["district"] = "(Province Level)"
+    
+    return df
+

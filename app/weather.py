@@ -98,14 +98,21 @@ def fetch_province_forecast(province: dict, fetch_round: str = "morning",
         "forecast_days": 4,
     }
 
-    try:
-        resp = requests.get(BASE_URL, params=params, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-    except Exception as e:
-        label = province.get("district", province["province"])
-        print(f"  ❌ {label}: {e}")
-        return None
+    max_retries = 3
+    data = None
+    for attempt in range(max_retries):
+        try:
+            resp = requests.get(BASE_URL, params=params, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+            break  # Success
+        except Exception as e:
+            if attempt < max_retries - 1:
+                time.sleep(1)  # Wait 1 second before retrying
+            else:
+                label = province.get("district", province["province"])
+                print(f"  ❌ {label} (Failed after {max_retries} attempts): {e}")
+                return None
 
     daily   = data["daily"]
     current = data.get("current", {})
