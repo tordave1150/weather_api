@@ -85,6 +85,10 @@ if load_report or "rain_df" in st.session_state:
             }
     
     df = st.session_state.get("rain_df", pd.DataFrame())
+    
+    if not df.empty:
+        df = df[df["district"] != "(Province Level)"]
+        
     meta = st.session_state.get("rain_meta", {})
 
     if df.empty:
@@ -106,9 +110,8 @@ if load_report or "rain_df" in st.session_state:
             <h3>🏆 Top 15 Locations — Rain Volume (mm)</h3>
         </div>
         """, unsafe_allow_html=True)
-        top15 = df.nlargest(15, "precip_sum_mm")[["district", "province", "precip_sum_mm"]]
-        top15["label"] = top15["district"] + " (" + top15["province"] + ")"
-        st.bar_chart(top15.set_index("label")["precip_sum_mm"], color="#42a5f5")
+        top15 = df.nlargest(15, "precip_sum_mm")[["district", "precip_sum_mm"]]
+        st.bar_chart(top15.set_index("district")["precip_sum_mm"], color="#42a5f5")
 
         st.markdown("---")
 
@@ -126,8 +129,38 @@ if load_report or "rain_df" in st.session_state:
         if "rainy_hours_detail" in df_display.columns:
             df_display["rainy_hours_detail"] = df_display["rainy_hours_detail"].apply(lambda x: ", ".join(x) if isinstance(x, list) else x)
 
+        def add_emoji(val):
+            mapping = {
+                "No Rain": "☀️ No Rain",
+                "Light Rain": "🌤 Light Rain",
+                "Moderate Rain": "🌦 Moderate Rain",
+                "Heavy Rain": "🌧 Heavy Rain",
+                "Very Heavy Rain": "⛈ Very Heavy Rain",
+            }
+            return mapping.get(val, val)
+
+        def style_status(val):
+            if "No Rain" in str(val): return "color: #8a8f98;"
+            elif "Light Rain" in str(val): return "color: #7170ff; font-weight: 500;"
+            elif "Moderate Rain" in str(val): return "color: #10b981; font-weight: 500;"
+            elif "Heavy Rain" in str(val): return "color: #E89558; font-weight: 500;"
+            elif "Very Heavy Rain" in str(val): return "color: #EA2143; font-weight: 600;"
+            return ""
+
+        if "rain_status" in df_display.columns:
+            df_display["rain_status"] = df_display["rain_status"].apply(add_emoji)
+
+        df_sorted = df_display.sort_values("precip_sum_mm", ascending=False)
+        
+        # Apply pandas styler if rain_status is present
+        if "rain_status" in df_sorted.columns:
+            # Use map for pandas >= 2.1.0, otherwise applymap
+            styler = df_sorted.style.map(style_status, subset=["rain_status"]) if hasattr(df_sorted.style, "map") else df_sorted.style.applymap(style_status, subset=["rain_status"])
+        else:
+            styler = df_sorted
+
         st.dataframe(
-            df_display.sort_values("precip_sum_mm", ascending=False),
+            styler,
             width="stretch",
             height=400,
         )
