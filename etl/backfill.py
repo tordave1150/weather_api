@@ -172,33 +172,95 @@ def main():
     
     print(f"Loaded {len(locations)} locations.")
     
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     all_docs = []
-    total = len(locations)
     
-    for i, loc in enumerate(locations, 1):
-        label = loc.get("district", loc.get("province", "Unknown"))
-        print(f"  [{i:03d}/{total}] Fetching {label} ...", end=" ", flush=True)
-        
-        docs = fetch_historical_data(loc, str(start_date), str(end_date), args.level)
-        if docs:
-            all_docs.extend(docs)
-            print(f"OK ({len(docs)} days)")
-        else:
-            print("FAILED")
+    def process_location(idx, loc):
+        url = f"{BASE_URL}?latitude={loc['lat']}&longitude={loc['lon']}&start_date={start_date}&end_date={end_date}&daily=precipitation_sum,temperature_2m_max,temperature_2m_min,wind_gusts_10m_max,rain_sum,showers_sum,precipitation_hours&hourly=precipitation&timezone=Asia%2FBangkok"
+        try:
+            r = requests.get(url, timeout=10)
+            r.raise_for_status()
+            data = r.json()
             
-        time.sleep(0.1) # Small sleep to respect API limits
+            docs = []
+            if "daily" not in data or "time" not in data["daily"]:
+                return docs
 
-    if not all_docs:
-        print("\nNo data fetched. Check API status or parameters.")
-        sys.exit(1)
+            dates = data["daily"]["time"]
+            for i, date_str in enumerate(dates):
+                precip_sum_mm = data["daily"].get("precipitation_sum", [])[i]
+                rain_sum_mm = data["daily"].get("rain_sum", [])[i]
+                showers_sum_mm = data["daily"].get("showers_sum", [])[i]
+                precip_hours = data["daily"].get("precipitation_hours", [])[i]
+                temp_max_c = data["daily"].get("temperature_2m_max", [])[i]
+                temp_min_c = data["daily"].get("temperature_2m_min", [])[i]
+                wind_max_kmh = data["daily"].get("wind_gusts_10m_max", [])[i]
 
-    print(f"\nUpserting {len(all_docs)} documents to MongoDB 'weather_historical' collection...")
+                has_rain = precip_sum_mm > 0 if precip_sum_mm is not None else False
+                rain_status = "No Rain"
+                if has_rain:
+                    if precip_sum_mm >= 35: rain_status = "Very Heavy Rain"
+                    elif precip_sum_mm >= 10: rain_status = "Heavy Rain"
+                    elif precip_sum_mm >= 0.1: rain_status = "Light Rain"
+
+                rainy_hours_detail = []
+                if "hourly" in data and "time" in data["hourly"]:
+                    hourly_times = data["hourly"]["time"]
+                    hourly_precip = data["hourly"].get("precipitation", [])
+                    for t, p in zip(hourly_times, hourly_precip):
+                        if t.startswith(date_str) and p and p > 0:
+                            time_only = t.split("T")[1]
+                            rainy_hours_detail.append(f"{time_only} ({p}mm)")
+
+                doc = {
+                    "date": date_str,
+                    "district": loc.get("district", "(Province Level)"),
+                    "province": loc.get("province", ""),
+                    "region": loc.get("region", ""),
+                    "has_rain": has_rain,
+                    "rain_status": rain_status,
+                    "precip_sum_mm": precip_sum_mm,
+                    "rain_sum_mm": rain_sum_mm,
+                    "showers_sum_mm": showers_sum_mm,
+                    "precip_hours": precip_hours,
+                    "temp_max_c": temp_max_c,
+                    "temp_min_c": temp_min_c,
+                    "wind_max_kmh": wind_max_kmh,
+                    "rainy_hours_detail": rainy_hours_detail
+                }
+                docs.append(doc)
+            return docs
+        except Exception as e:
+            print(f"Error fetching {loc.get('district', '')}: {e}")
+            return []
+
+    print(f"\nFetching data for {len(locations)} locations using ThreadPoolExecutor (max 10 threads)...")
     collection = get_collection()
-    saved = upsert_all(collection, all_docs)
-
-    print(f"\n{'='*55}")
-    print(f"Done: {saved}/{len(all_docs)} documents saved.")
-    print(f"{'='*55}\n")
+    
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        future_to_loc = {executor.submit(process_location, idx, loc): loc for idx, loc in enumerate(locations, 1)}
+        
+        count = 0
+        for future in as_completed(future_to_loc):
+            docs = future.result()
+            if docs:
+                all_docs.extend(docs)
+            count += 1
+            if count % 10 == 0:
+                print(f"  [{count:03d}/{len(locations)}] processed.")
+                
+            if len(all_docs) >= 500:
+                print(f"  >> Upserting batch of {len(all_docs)} documents...")
+                upsert_all(collection, all_docs)
+                all_docs = []
+                
+    if all_docs:
+        print(f"\nUpserting final {len(all_docs)} documents to MongoDB 'weather_historical' collection...")
+    else:
+        print("\nAll batches upserted successfully.")
+        
+    print("\n✅ Backfill completed successfully!")
 
 if __name__ == "__main__":
     main()
