@@ -115,50 +115,14 @@ try:
 
         ETL_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "etl", "fetch_weather.py")
 
-        col_a, col_b = st.columns(2)
-        with col_a:
-            if st.button("🌅 Morning", width="stretch"):
-                with st.spinner("Fetching data..."):
-                    try:
-                        r = subprocess.run(
-                            [sys.executable, ETL_PATH, "--round", "morning"],
-                            capture_output=True, text=True, timeout=300
-                        )
-                        if r.returncode == 0:
-                            st.success("✅ Morning fetch complete!")
-                            st.cache_data.clear()
-                            st.rerun()
-                        else:
-                            st.error(f"❌ {r.stderr[:300]}")
-                    except subprocess.TimeoutExpired:
-                        st.error("⏱ Timeout (5 mins)")
-                    except Exception as e:
-                        st.error(f"❌ {e}")
-
-        with col_b:
-            if st.button("🌇 Afternoon", width="stretch"):
-                with st.spinner("Fetching data..."):
-                    try:
-                        r = subprocess.run(
-                            [sys.executable, ETL_PATH, "--round", "afternoon"],
-                            capture_output=True, text=True, timeout=300
-                        )
-                        if r.returncode == 0:
-                            st.success("✅ Afternoon fetch complete!")
-                            st.cache_data.clear()
-                            st.rerun()
-                        else:
-                            st.error(f"❌ {r.stderr[:300]}")
-                    except subprocess.TimeoutExpired:
-                        st.error("⏱ Timeout (5 mins)")
-                    except Exception as e:
-                        st.error(f"❌ {e}")
-
-        if st.button("Fetch Both Rounds", width="stretch"):
-            with st.spinner("Fetching both rounds..."):
+        if st.button("Refresh", use_container_width=True):
+            with st.spinner("Fetching data..."):
                 try:
+                    import datetime
+                    now_bkk = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=7)))
+                    current_round = "afternoon" if now_bkk.hour >= 13 else "morning"
                     r = subprocess.run(
-                        [sys.executable, ETL_PATH],
+                        [sys.executable, ETL_PATH, "--round", current_round],
                         capture_output=True, text=True, timeout=300
                     )
                     if r.returncode == 0:
@@ -258,7 +222,7 @@ components.html(
     render_hero_3d(
         rain_prob_avg=round(avg_prob, 1),
         high_rain_count=high_rain,
-        date_str=str(selected_date),
+        date_str=f"{selected_date} {_refresh_time}" if _refresh_time != "—" else str(selected_date),
     ),
     height=296, # 280px + 16px margin
 )
@@ -276,23 +240,23 @@ if alert["show"]:
 kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 
 with kpi1:
-    st.metric(f"Total {location_label}", total_locations)
-    st.markdown('<p class="metric-sub">All regions included</p>', unsafe_allow_html=True)
+    st.metric("Coverage", total_locations)
+    st.markdown(f'<p class="metric-sub">{location_label} tracked</p>', unsafe_allow_html=True)
 with kpi2:
-    st.metric("High Rain Zones", high_rain)
+    st.metric("High Risk Zones", high_rain)
     st.markdown('<p class="metric-sub">≥ 40% rain probability</p>', unsafe_allow_html=True)
 with kpi3:
-    st.metric("Very Heavy Rain", very_heavy)
+    st.metric("Severe Rain", very_heavy)
     st.markdown('<p class="metric-sub">Exceeds 35 mm/day</p>', unsafe_allow_html=True)
 with kpi4:
-    st.metric("Avg Rain Probability", f"{avg_prob}%")
-    st.markdown(f'<p class="metric-sub">Across all {total_locations} {location_label_lower}</p>', unsafe_allow_html=True)
+    st.metric("Precipitation Risk", f"{avg_prob}%")
+    st.markdown('<p class="metric-sub">Across all regions</p>', unsafe_allow_html=True)
 
 # ── Map Side-by-Side (Current vs Predicted) ───────────────────────────
 col_map_curr, col_map_pred = st.columns(2)
 
 with col_map_pred:
-    map_title_pred = f"🗺️ Predicted Daily Rain ({location_label})"
+    map_title_pred = "🗺️ Rainfall Forecast"
     st.markdown(f"""
     <div class="section-card-header">
         <h3>{map_title_pred}</h3>
@@ -306,7 +270,7 @@ with col_map_pred:
     render_map(data, level=level, map_type="predicted")
 
 with col_map_curr:
-    map_title_curr = f"📡 Current Rain (Latest Refresh) ({location_label})"
+    map_title_curr = "📡 Live Precipitation"
     st.markdown(f"""
     <div class="section-card-header">
         <h3>{map_title_curr}</h3>
@@ -330,7 +294,7 @@ else:
 
 st.markdown(f"""
 <div class="section-card-header" style="margin-top: 8px; background: #FFFFFF; border-radius: 12px 12px 0 0; border: 1px solid #BFDBFE; border-bottom: none;">
-    <h3>📅 3-Day Forecast by Region</h3>
+    <h3>📅 Regional Outlook (3-Day)</h3>
     <div class="legend"><span>{date_range_str}</span></div>
 </div>
 """, unsafe_allow_html=True)

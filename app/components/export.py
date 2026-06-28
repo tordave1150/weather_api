@@ -61,6 +61,7 @@ def render_export(data: list[dict], selected_date: str, level: str = "province")
             data=csv_data,
             file_name=f"weather_audit{level_suffix}_{selected_date}.csv",
             mime="text/csv",
+            use_container_width=True,
         )
 
         # ── Excel download ────────────────────────────────────────────
@@ -71,4 +72,5 @@ def render_export(data: list[dict], selected_date: str, level: str = "province")
             data=buffer.getvalue(),
             file_name=f"weather_audit{level_suffix}_{selected_date}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
         )

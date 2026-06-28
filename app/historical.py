@@ -10,12 +10,16 @@ from db import get_historical_rain  # function ใหม่ใน db.py
 from theme import apply_theme
 apply_theme()
 
-st.markdown(f"""
+st.markdown("""
 <div class="hero-banner">
     <div class="hero-left">
         <p class="eyebrow">Thailand Historical Weather</p>
-        <h1>🌧 Historical Rain Report</h1>
-        <p class="hero-sub">View actual rain data by district based on the selected date and province.</p>
+        <h1 style="font-size:32px;">🌧 Historical Rain Report</h1>
+        <p class="hero-sub">Actual rain data by district — select a date, province, and hour to explore.</p>
+    </div>
+    <div class="date-badge" style="min-width:120px;">
+        <p>Data source</p>
+        <strong>Open-Meteo</strong>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -50,9 +54,9 @@ with col3:
 # ── Fetch Button ──
 col_btn1, col_btn2, _ = st.columns([2, 2, 4])
 with col_btn1:
-    fetch_now = st.button("Fetch Live Data Now", width="stretch", type="tertiary")
+    fetch_now = st.button("Fetch Live Data Now", use_container_width=True, type="secondary")
 with col_btn2:
-    load_report = st.button("Load Report", width="stretch", type="tertiary")
+    load_report = st.button("Load Report", use_container_width=True, type="secondary")
 
 if fetch_now:
     ETL_PATH = os.path.join(os.path.dirname(__file__), '..', 'etl', 'fetch_weather.py')
@@ -174,11 +178,11 @@ if load_report or "rain_df" in st.session_state:
             filename_base = f"rain_{meta.get('date', selected_date)}_{(meta.get('province', selected_province) or 'all').replace(' ', '_')}"
             
             st.download_button(
-                label="📄 Export CSV (UTF-8)",
+                label="📄 Export CSV",
                 data=csv_bytes,
                 file_name=f"{filename_base}.csv",
                 mime="text/csv",
-                width="stretch",
+                use_container_width=True,
             )
             
             excel_buf = io.BytesIO()
@@ -197,5 +201,5 @@ if load_report or "rain_df" in st.session_state:
                 data=excel_buf.read(),
                 file_name=f"{filename_base}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                width="stretch",
+                use_container_width=True,
             )
