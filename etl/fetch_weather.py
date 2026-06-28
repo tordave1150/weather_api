@@ -11,7 +11,7 @@ Usage:
     python etl/fetch_weather.py --level district --round afternoon
 
 Cron schedule (UTC):
-    0 22 * * *   python etl/fetch_weather.py --round morning    (= 05:00 Bangkok)
+    0 1 * * *   python etl/fetch_weather.py --round morning    (= 08:00 Bangkok)
     0  6 * * *   python etl/fetch_weather.py --round afternoon  (= 13:00 Bangkok)
 
 This script runs standalone without Streamlit — secrets loaded via toml.
@@ -104,7 +104,7 @@ def main():
         "--round",
         choices=["morning", "afternoon"],
         default="morning",
-        help="Fetch round: morning (05:00 BKK) or afternoon (13:00 BKK)"
+        help="Fetch round: morning (08:00 BKK) or afternoon (13:00 BKK)"
     )
     parser.add_argument(
         "--level",
@@ -145,6 +145,13 @@ def main():
     print(f"Done: {saved}/{len(docs)} {level_label} saved  |  Date: {date_label}")
     print(f"{'='*55}\n")
 
+
+    # Update cache-buster file to notify Streamlit to invalidate cache instantly
+    cache_buster_path = ROOT / "data/last_update.txt"
+    try:
+        cache_buster_path.write_text(datetime.now(tz=TZ_BANGKOK).isoformat(), encoding="utf-8")
+    except Exception as e:
+        print(f"Warning: Could not write cache buster file: {e}")
 
 if __name__ == "__main__":
     main()

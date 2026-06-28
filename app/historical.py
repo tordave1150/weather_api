@@ -7,8 +7,8 @@ import sys, os, subprocess
 from db import get_historical_rain  # function ใหม่ใน db.py
 
 
-from components.style import inject_custom_css
-inject_custom_css()
+from theme import apply_theme
+apply_theme()
 
 st.markdown(f"""
 <div class="hero-banner">
@@ -186,7 +186,7 @@ if load_report or "rain_df" in st.session_state:
                 df_display.to_excel(writer, index=False, sheet_name="Rain Report")
                 workbook = writer.book
                 worksheet = writer.sheets["Rain Report"]
-                header_fmt = workbook.add_format({"bold": True, "bg_color": "#1e2130", "font_color": "#ffffff"})
+                header_fmt = workbook.add_format({"bold": True, "bg_color": "#EFF6FF", "font_color": "#1E40AF"})
                 for col_num, col_name in enumerate(display_cols):
                     worksheet.write(0, col_num, col_name, header_fmt)
                     worksheet.set_column(col_num, col_num, 18)

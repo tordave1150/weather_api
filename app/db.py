@@ -9,7 +9,8 @@ from pymongo import MongoClient
 
 @st.cache_resource
 def get_client():
-    return MongoClient(st.secrets["mongodb"]["uri"])
+    """Return a shared MongoClient. Streamlit reuses this across all reruns."""
+    return MongoClient(st.secrets["mongodb"]["uri"], serverSelectionTimeoutMS=5000)
 
 
 @st.cache_resource
@@ -21,6 +22,50 @@ def get_db():
     client = get_client()
     db = client[st.secrets["mongodb"]["db_name"]]
     return db[st.secrets["mongodb"]["collection"]]
+
+
+def get_cache_buster() -> str:
+    """Read the last_update.txt file to act as a cache buster."""
+    import pathlib
+    path = pathlib.Path(__file__).resolve().parent.parent / "data" / "last_update.txt"
+    try:
+        if path.exists():
+            return path.read_text(encoding="utf-8").strip()
+    except Exception:
+        pass
+    return "0"
+
+
+@st.cache_data(ttl=600)
+def fetch_weather_data(date_str: str, regions: tuple, rain_levels: tuple, level: str = "province", cache_buster: str = "") -> list[dict]:
+    """Query MongoDB with filter parameters, cached for 10 minutes.
+
+    Uses tuple parameters instead of lists because st.cache_data
+    requires hashable argument types.
+
+    Args:
+        date_str:    Date string in YYYY-MM-DD format.
+        regions:     Tuple of region names, e.g. ("Central", "Northern").
+        rain_levels: Tuple of rain level strings, e.g. ("Heavy Rain",).
+        level:       "province" | "district" — granularity level.
+
+    Returns:
+        List of forecast dicts (without _id field).
+    """
+    client = get_client()
+    db = client[st.secrets["mongodb"]["db_name"]]
+    col = db[st.secrets["mongodb"]["collection"]]
+
+    query: dict = {"date": date_str, "level": level}
+
+    if regions:
+        query["region"] = {"$in": list(regions)}
+    if rain_levels:
+        query["rain_level"] = {"$in": list(rain_levels)}
+
+    sort_key = "district" if level == "district" else "province"
+    docs = list(col.find(query, {"_id": 0}).sort(sort_key, 1))
+    return docs
 
 
 def upsert_forecast(collection, doc: dict):

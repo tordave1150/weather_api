@@ -1,10 +1,14 @@
 """
-Weather Advisor — Streamlit Dashboard (main entry point).
+Weather Advisor — Streamlit Dashboard (Forecast page).
 
 Read-only dashboard that displays weather forecast data for all 77 Thai provinces.
 Data is fetched by the ETL script (etl/fetch_weather.py) and stored in MongoDB Atlas.
 
 Run with: streamlit run app/main.py
+
+Task 1: 3D Hero Section (particle animation)
+Task 2: Sky Palette light theme
+Task 3: Caching layer integration
 """
 
 import json
@@ -16,339 +20,16 @@ import os
 import streamlit as st
 import pandas as pd
 
-from db import get_db, get_forecasts
+from db import get_db, fetch_weather_data, get_cache_buster
 from components.sidebar import render_sidebar
 from components.map_view import render_map
 from components.export import render_export
+from components.hero_3d import render_hero_3d
+from theme import apply_theme, get_alert_level
 
-# ── Force Dark Theme CSS (FEAT-02) ─────────────────────────────────────
-st.markdown("""
-<style>
-:root, [data-theme], [data-testid="stAppViewContainer"],
-[data-testid="stSidebar"], .main, .block-container {
-    color-scheme: dark !important;
-    background-color: #0e1117 !important;
-    color: #fafafa !important;
-}
-section[data-testid="stSidebar"] {
-    background-color: #161b22 !important;
-}
-[data-testid="metric-container"] {
-    background-color: #1a1d27 !important;
-    border: 1px solid #2d3142 !important;
-    border-radius: 8px;
-    padding: 12px !important;
-}
-[data-testid="stDataFrame"] thead th {
-    background-color: #1e2130 !important;
-    color: #fafafa !important;
-}
-details summary, .streamlit-expanderHeader {
-    background-color: #1e2130 !important;
-    color: #fafafa !important;
-}
-.stSelectbox > div, .stDateInput > div, .stTextInput > div {
-    background-color: #1e2130 !important;
-    color: #fafafa !important;
-}
-.stButton > button {
-    border: 1px solid rgba(255, 255, 255, 0.08) !important;
-    border-radius: 6px !important;
-    background: rgba(255, 255, 255, 0.02) !important;
-    font-size: 13px !important;
-    font-weight: 500 !important;
-    color: #e2e4e7 !important;
-}
-.stButton > button:hover {
-    background: rgba(255, 255, 255, 0.05) !important;
-    border-color: rgba(255, 255, 255, 0.15) !important;
-}
-</style>
-""", unsafe_allow_html=True)
+# ── Apply Sky Palette Light Theme (Task 2) ───────────────────────────
+apply_theme()
 
-
-# ── Design System CSS (Spec Section 4) ────────────────────────────────
-st.markdown("""
-<style>
-/* ── CSS Variables (Linear Design System) ── */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
-
-:root {
-    --color-bg-tertiary: #08090a;
-    --color-bg-primary: #0f1011;
-    --color-bg-secondary: #191a1b;
-    --color-border-tertiary: rgba(255, 255, 255, 0.08);
-    --color-border-subtle: rgba(255, 255, 255, 0.05);
-    --color-text-primary: #f7f8f8;
-    --color-text-secondary: #d0d6e0;
-    --color-text-tertiary: #8a8f98;
-    --color-accent-blue: #5e6ad2;
-    --color-info-blue: #7170ff;
-    --color-teal: #10b981;
-    --color-amber: #E89558;
-    --color-red: #EA2143;
-}
-
-/* ── Reset & base ── */
-[data-testid="stAppViewContainer"] {
-    background: var(--color-bg-tertiary) !important;
-    font-family: 'Inter', sans-serif !important;
-    font-feature-settings: "cv01", "ss03" !important;
-}
-.block-container {
-    padding-top: 1rem;
-    padding-bottom: 1rem;
-    max-width: 1400px;
-}
-
-/* ── Sidebar ── */
-[data-testid="stSidebar"] {
-    background: var(--color-bg-primary) !important;
-    border-right: 1px solid var(--color-border-subtle) !important;
-}
-[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
-    font-size: 13px;
-    color: var(--color-text-secondary);
-}
-[data-testid="stSidebar"] .stMultiSelect [data-baseweb="tag"] {
-    background: rgba(255, 255, 255, 0.04) !important;
-    color: var(--color-text-secondary) !important;
-    border-radius: 9999px !important;
-    font-size: 11px !important;
-    border: 1px solid rgb(35, 37, 42) !important;
-}
-
-/* ── Metric cards ── */
-[data-testid="stMetric"] {
-    background: rgba(255, 255, 255, 0.02) !important;
-    border: 1px solid var(--color-border-tertiary) !important;
-    border-radius: 8px !important;
-    padding: 14px 16px !important;
-}
-[data-testid="stMetricLabel"] {
-    font-size: 12px !important;
-    font-weight: 500 !important;
-    text-transform: none !important;
-    letter-spacing: normal !important;
-    color: var(--color-text-tertiary) !important;
-}
-[data-testid="stMetricValue"] {
-    font-size: 32px !important;
-    font-weight: 500 !important;
-    letter-spacing: -0.704px !important;
-    color: var(--color-text-primary) !important;
-}
-
-/* ── Dataframe table ── */
-[data-testid="stDataFrame"] th {
-    font-size: 12px !important;
-    font-weight: 500 !important;
-    text-transform: none !important;
-    letter-spacing: normal !important;
-    color: var(--color-text-tertiary) !important;
-}
-
-/* ── Buttons ── */
-.stDownloadButton > button {
-    border: 1px solid var(--color-border-tertiary) !important;
-    border-radius: 6px !important;
-    background: rgba(255, 255, 255, 0.02) !important;
-    font-size: 13px !important;
-    font-weight: 500 !important;
-    color: #e2e4e7 !important;
-    width: 100% !important;
-}
-.stDownloadButton > button:hover {
-    background: rgba(255, 255, 255, 0.05) !important;
-}
-
-/* ── Hero banner ── */
-.hero-banner {
-    background: var(--color-bg-primary);
-    border: 1px solid var(--color-border-tertiary);
-    border-radius: 12px;
-    padding: 24px 32px;
-    color: var(--color-text-primary);
-    margin-bottom: 24px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-.hero-banner .hero-left {}
-.hero-banner .eyebrow {
-    font-size: 12px;
-    letter-spacing: -0.15px;
-    text-transform: none;
-    color: var(--color-text-tertiary);
-    margin: 0 0 8px 0;
-}
-.hero-banner h1 {
-    font-size: 48px;
-    font-weight: 500;
-    margin: 0 0 8px 0;
-    color: var(--color-text-primary);
-    letter-spacing: -1.056px;
-    line-height: 1.0;
-}
-.hero-banner .hero-sub {
-    font-size: 15px;
-    color: var(--color-text-secondary);
-    margin: 0;
-    letter-spacing: -0.165px;
-}
-.hero-banner .date-badge {
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid var(--color-border-subtle);
-    border-radius: 8px;
-    padding: 12px 20px;
-    text-align: center;
-}
-.hero-banner .date-badge p {
-    font-size: 11px;
-    font-weight: 500;
-    text-transform: none;
-    color: var(--color-text-tertiary);
-    margin: 0 0 4px 0;
-}
-.hero-banner .date-badge strong {
-    font-size: 18px;
-    font-weight: 500;
-    color: var(--color-text-primary);
-    letter-spacing: -0.165px;
-}
-
-/* ── Alert bar ── */
-.alert-bar {
-    background: rgba(234, 33, 67, 0.1);
-    border: 1px solid rgba(234, 33, 67, 0.2);
-    border-radius: 6px;
-    padding: 12px 16px;
-    font-size: 14px;
-    color: var(--color-red);
-    margin-bottom: 24px;
-}
-
-/* ── Rain level badges (Linear pill style) ── */
-.badge-no-rain    { background: transparent; color: var(--color-text-secondary); border-radius: 9999px; padding: 2px 10px 2px 10px; border: 1px solid rgb(35,37,42); font-size: 12px; font-weight: 500; display: inline-block; }
-.badge-light      { background: transparent; color: var(--color-info-blue); border-radius: 9999px; padding: 2px 10px 2px 10px; border: 1px solid rgba(113, 112, 255, 0.3); font-size: 12px; font-weight: 500; display: inline-block; }
-.badge-moderate   { background: transparent; color: var(--color-teal); border-radius: 9999px; padding: 2px 10px 2px 10px; border: 1px solid rgba(16, 185, 129, 0.3); font-size: 12px; font-weight: 500; display: inline-block; }
-.badge-heavy      { background: transparent; color: var(--color-amber); border-radius: 9999px; padding: 2px 10px 2px 10px; border: 1px solid rgba(232, 149, 88, 0.3); font-size: 12px; font-weight: 500; display: inline-block; }
-.badge-veryheavy  { background: transparent; color: var(--color-red); border-radius: 9999px; padding: 2px 10px 2px 10px; border: 1px solid rgba(234, 33, 67, 0.3); font-size: 12px; font-weight: 500; display: inline-block; }
-
-/* ── Section card wrapper ── */
-.section-card {
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid var(--color-border-tertiary);
-    border-radius: 12px;
-    padding: 0;
-    margin-bottom: 24px;
-    overflow: hidden;
-}
-.section-card-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 16px 20px;
-    border-bottom: 1px solid var(--color-border-subtle);
-}
-.section-card-header h3 {
-    font-size: 15px;
-    font-weight: 500;
-    color: var(--color-text-primary);
-    margin: 0;
-    letter-spacing: -0.165px;
-}
-.section-card-header .legend {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    font-size: 13px;
-    color: var(--color-text-tertiary);
-}
-.section-card-header .legend .dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    display: inline-block;
-    margin-right: 6px;
-}
-.section-card-body {
-    padding: 16px 20px;
-}
-
-/* ── Forecast day cards ── */
-.forecast-day-card {
-    background: rgba(255, 255, 255, 0.02);
-    border-radius: 6px;
-    border: 1px solid var(--color-border-subtle);
-    padding: 12px 14px;
-}
-.forecast-day-card .day-label {
-    font-size: 11px;
-    font-weight: 500;
-    color: var(--color-text-tertiary);
-    margin: 0 0 6px 0;
-}
-.forecast-day-card .day-value {
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--color-text-primary);
-    margin: 0;
-}
-
-/* ── Region dots ── */
-.region-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    display: inline-block;
-    margin-right: 8px;
-    vertical-align: middle;
-}
-
-/* ── Metric sub-labels ── */
-.metric-sub {
-    font-size: 13px;
-    color: var(--color-text-tertiary);
-    margin-top: 4px;
-}
-.metric-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    display: inline-block;
-    margin-right: 6px;
-    vertical-align: middle;
-}
-
-/* ── FEAT-03: Region header (flat display) ── */
-.region-header-flat {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin: 16px 0 8px 0;
-    padding: 10px 16px;
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid var(--color-border-tertiary);
-    border-radius: 8px;
-}
-.region-header-flat .region-dot-flat {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    display: inline-block;
-}
-.region-header-flat .region-name {
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--color-text-primary);
-}
-.region-header-flat .region-count {
-    font-size: 12px;
-    color: var(--color-text-tertiary);
-}
-</style>
-""", unsafe_allow_html=True)
 
 # ── Helper Functions ──────────────────────────────────────────────────
 
@@ -378,12 +59,12 @@ def get_rain_badge_html(level: str) -> str:
 
 
 REGION_DOT_COLORS = {
-    "Central": "#378ADD",
-    "Northern": "#E24B4A",
-    "Northeastern": "#EF9F27",
-    "Eastern": "#1D9E75",
-    "Southern": "#7F77DD",
-    "Western": "#888780",
+    "Central": "#2563EB",
+    "Northern": "#EF4444",
+    "Northeastern": "#F97316",
+    "Eastern": "#22C55E",
+    "Southern": "#8B5CF6",
+    "Western": "#64748B",
 }
 
 
@@ -428,12 +109,12 @@ try:
     available_districts = sorted(list(district_coords.keys()))
     filters = render_sidebar(collection, available_provinces, available_districts)
 
-    # ── ETL Trigger (ส่วน admin ใน sidebar) ──
+    # ── ETL Trigger (admin section in sidebar) ──
     with st.sidebar:
-        st.markdown('<p style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:#6B6A63; margin: 24px 0 4px 0;">DATA UPDATE</p>', unsafe_allow_html=True)
-        
+        st.markdown('<p style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:#64748B; margin: 24px 0 4px 0;">DATA UPDATE</p>', unsafe_allow_html=True)
+
         ETL_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "etl", "fetch_weather.py")
-        
+
         col_a, col_b = st.columns(2)
         with col_a:
             if st.button("🌅 Morning", width="stretch"):
@@ -445,6 +126,8 @@ try:
                         )
                         if r.returncode == 0:
                             st.success("✅ Morning fetch complete!")
+                            st.cache_data.clear()
+                            st.rerun()
                         else:
                             st.error(f"❌ {r.stderr[:300]}")
                     except subprocess.TimeoutExpired:
@@ -462,13 +145,15 @@ try:
                         )
                         if r.returncode == 0:
                             st.success("✅ Afternoon fetch complete!")
+                            st.cache_data.clear()
+                            st.rerun()
                         else:
                             st.error(f"❌ {r.stderr[:300]}")
                     except subprocess.TimeoutExpired:
                         st.error("⏱ Timeout (5 mins)")
                     except Exception as e:
                         st.error(f"❌ {e}")
-        
+
         if st.button("Fetch Both Rounds", width="stretch"):
             with st.spinner("Fetching both rounds..."):
                 try:
@@ -476,7 +161,12 @@ try:
                         [sys.executable, ETL_PATH],
                         capture_output=True, text=True, timeout=300
                     )
-                    st.success("✅ Fetch complete!") if r.returncode == 0 else st.error(f"❌ {r.stderr[:300]}")
+                    if r.returncode == 0:
+                        st.success("✅ Fetch complete!")
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.error(f"❌ {r.stderr[:300]}")
                 except Exception as e:
                     st.error(f"❌ {e}")
 except Exception as e:
@@ -496,10 +186,12 @@ level = filters.get("level", "province")
 selected_province = filters.get("selected_province")
 
 # ── Fetch Data ────────────────────────────────────────────────────────
-raw_data = get_forecasts(
-    collection, selected_date,
-    selected_regions if selected_regions else None,
+raw_data = fetch_weather_data(
+    date_str=selected_date,
+    regions=tuple(selected_regions) if selected_regions else (),
+    rain_levels=tuple(selected_rain_levels) if selected_rain_levels else (),
     level=level,
+    cache_buster=get_cache_buster(),
 )
 
 # Apply filters client-side
@@ -560,30 +252,23 @@ if data:
 
 _round_label = f' · {_fetch_round.capitalize()} round' if _fetch_round else ""
 
-# ── Hero Banner ───────────────────────────────────────────────────────
-eyebrow_text = "Thailand District Weather Forecast" if level == "district" else "Thailand Provincial Weather Forecast"
-st.markdown(f"""
-<div class="hero-banner">
-    <div class="hero-left">
-        <p class="eyebrow">{eyebrow_text}</p>
-        <h1>⛈ Weather Advisor</h1>
-        <p class="hero-sub">{total_locations} {location_label_lower} displayed · Data updated daily from Open-Meteo</p>
-    </div>
-    <div class="date-badge">
-        <p>Data Date</p>
-        <strong>{selected_date}</strong>
-        <p style="font-size:10px; color:var(--color-text-tertiary); margin:6px 0 0 0;">
-            Refreshed {_refresh_time}{_round_label}
-        </p>
-    </div>
-</div>
-""", unsafe_allow_html=True)
+# ── 3D Hero Section (Task 1) ─────────────────────────────────────────
+import streamlit.components.v1 as components
+components.html(
+    render_hero_3d(
+        rain_prob_avg=round(avg_prob, 1),
+        high_rain_count=high_rain,
+        date_str=str(selected_date),
+    ),
+    height=296, # 280px + 16px margin
+)
 
-# ── Alert Bar ─────────────────────────────────────────────────────────
-if very_heavy >= 10:
+# ── Dynamic Alert Bar (Task 2) ───────────────────────────────────────
+alert = get_alert_level(very_heavy)
+if alert["show"]:
     st.markdown(f"""
-    <div class="alert-bar">
-        ⚠️ <strong>Heavy rain advisory:</strong> {very_heavy} {location_label_lower} are currently forecasting Very Heavy Rain — plan outdoor activities accordingly.
+    <div class="alert-bar {alert['css_class']}">
+        {alert['icon']} <strong>{alert['msg']}</strong> — plan outdoor activities accordingly.
     </div>
     """, unsafe_allow_html=True)
 
@@ -612,9 +297,9 @@ with col_map_pred:
     <div class="section-card-header">
         <h3>{map_title_pred}</h3>
         <div class="legend">
-            <span><span class="dot" style="background:#1D9E75;"></span>Mod</span>
-            <span><span class="dot" style="background:#EF9F27;"></span>Heavy</span>
-            <span><span class="dot" style="background:#E24B4A;"></span>V.Heavy</span>
+            <span><span class="dot" style="background:#22C55E;"></span>Mod</span>
+            <span><span class="dot" style="background:#F97316;"></span>Heavy</span>
+            <span><span class="dot" style="background:#EF4444;"></span>V.Heavy</span>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -626,9 +311,9 @@ with col_map_curr:
     <div class="section-card-header">
         <h3>{map_title_curr}</h3>
         <div class="legend">
-            <span><span class="dot" style="background:#1D9E75;"></span>Mod</span>
-            <span><span class="dot" style="background:#EF9F27;"></span>Heavy</span>
-            <span><span class="dot" style="background:#E24B4A;"></span>V.Heavy</span>
+            <span><span class="dot" style="background:#22C55E;"></span>Mod</span>
+            <span><span class="dot" style="background:#F97316;"></span>Heavy</span>
+            <span><span class="dot" style="background:#EF4444;"></span>V.Heavy</span>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -644,7 +329,7 @@ else:
     date_range_str = ""
 
 st.markdown(f"""
-<div class="section-card-header" style="margin-top: 8px; background: var(--color-bg-primary); border-radius: 12px 12px 0 0; border: 0.5px solid var(--color-border-tertiary); border-bottom: none;">
+<div class="section-card-header" style="margin-top: 8px; background: #FFFFFF; border-radius: 12px 12px 0 0; border: 1px solid #BFDBFE; border-bottom: none;">
     <h3>📅 3-Day Forecast by Region</h3>
     <div class="legend"><span>{date_range_str}</span></div>
 </div>
@@ -665,20 +350,20 @@ if data:
         docs = grouped.get(region, [])
         if not docs:
             continue
-            
+
         # Sort docs by highest rain prob today
         docs_sorted = sorted(docs, key=lambda x: x.get("rain_probability", 0), reverse=True)
-        
+
         with st.expander(f"{region} Region ({len(docs)} {count_label})"):
             for d in docs_sorted:
                 loc_name = d.get("district") or d.get("province", "Unknown")
                 prob = d.get("rain_probability", 0)
                 emoji = get_rain_emoji(d.get("rain_level", ""))
-                
+
                 st.markdown(f"""
                 <div class="list-item">
                     <span class="loc-name">{loc_name}</span>
-                    <span class="badge" style="background: rgba(255,255,255,0.05); color: #ccc;">
+                    <span class="badge" style="background: #EFF6FF; color: #1E40AF; border: 1px solid #BFDBFE; border-radius: 9999px; padding: 2px 10px; font-size: 12px;">
                         Today: {emoji} {prob}%
                     </span>
                 </div>
@@ -697,27 +382,32 @@ if data:
                             fc_date_short = dt.strftime("%b %d")
                         except Exception:
                             fc_date_short = fc_date
-                            
-                        # Dynamic color logic for cards
+
+                        # Dynamic color logic for cards (Sky Palette)
                         if fc_level == "Very Heavy Rain":
-                            bg_color = "rgba(226, 75, 74, 0.15)"
-                            text_color = "var(--color-red)"
+                            bg_color = "rgba(239, 68, 68, 0.08)"
+                            text_color = "#DC2626"
+                            border_color = "#FECACA"
                         elif fc_level == "Heavy Rain":
-                            bg_color = "rgba(239, 159, 39, 0.15)"
-                            text_color = "var(--color-amber)"
+                            bg_color = "rgba(249, 115, 22, 0.08)"
+                            text_color = "#EA580C"
+                            border_color = "#FED7AA"
                         elif fc_level == "Moderate Rain":
-                            bg_color = "rgba(16, 185, 129, 0.15)"
-                            text_color = "var(--color-teal)"
+                            bg_color = "rgba(34, 197, 94, 0.08)"
+                            text_color = "#16A34A"
+                            border_color = "#BBF7D0"
                         elif fc_level == "Light Rain":
-                            bg_color = "rgba(113, 112, 255, 0.15)"
-                            text_color = "var(--color-info-blue)"
+                            bg_color = "rgba(6, 95, 70, 0.06)"
+                            text_color = "#065F46"
+                            border_color = "#6EE7B7"
                         else:
-                            bg_color = "rgba(255, 255, 255, 0.02)"
-                            text_color = "var(--color-text-primary)"
+                            bg_color = "#F8FAFF"
+                            text_color = "#0F172A"
+                            border_color = "#E2E8F0"
 
                         with fcols[i]:
                             st.markdown(f"""
-                            <div class="forecast-day-card" style="background: {bg_color}; border-color: {bg_color};">
+                            <div class="forecast-day-card" style="background: {bg_color}; border-color: {border_color};">
                                 <p class="day-label">Day+{i+1} · {fc_date_short}</p>
                                 <p class="day-value" style="color: {text_color};">{fc_emoji} {fc_level} ({fc.get('rain_prob', 0)}%)</p>
                             </div>

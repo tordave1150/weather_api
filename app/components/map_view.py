@@ -2,8 +2,12 @@
 Map view component — pydeck GeoJsonLayer choropleth.
 Supports both Predicted (Daily) and Current (Real-time) map types,
 and both Province and District granularity levels.
+
+Task 2: Updated with light map style and Sky Palette tooltip.
+Task 3: Added @st.cache_data caching for GeoJSON loading.
 """
 
+import copy
 import json
 import pathlib
 
@@ -11,16 +15,16 @@ import streamlit as st
 import pydeck as pdk
 
 
-# Color mapping: rain_level → RGBA
+# Color mapping: rain_level → RGBA (updated for Sky Palette — Task 2)
 RAIN_COLORS = {
     "No Rain":         [150, 150, 150, 100],      # gray
-    "Light Rain":      [29, 158, 117, 160],       # teal light
-    "Moderate Rain":   [29, 158, 117, 200],       # teal #1D9E75
-    "Heavy Rain":      [239, 159, 39, 220],       # amber #EF9F27
-    "Very Heavy Rain": [226, 75, 74, 240],        # red #E24B4A
+    "Light Rain":      [34, 197, 94, 160],         # green
+    "Moderate Rain":   [34, 197, 94, 200],         # green #22C55E
+    "Heavy Rain":      [249, 115, 22, 220],        # orange #F97316
+    "Very Heavy Rain": [239, 68, 68, 240],         # red #EF4444
 }
 
-NO_DATA_COLOR = [40, 40, 40, 80]
+NO_DATA_COLOR = [200, 200, 200, 60]
 
 
 @st.cache_data
@@ -52,53 +56,37 @@ def _get_current_rain_level(mm: float) -> str:
     return "Very Heavy Rain"
 
 
-def render_map(data: list[dict], level: str = "province", map_type: str = "predicted"):
-    """Render a pydeck GeoJsonLayer choropleth map.
+@st.cache_data(ttl=3600, show_spinner="Preparing map…")
+def _build_geojson_features(data_key: str, lookup_data: tuple, level: str):
+    """Build colored GeoJSON features from lookup data.
+
+    Cached for 1 hour — map geometry doesn't change often.
 
     Args:
-        data: List of forecast dicts.
-        level: "province" | "district"
-        map_type: "predicted" (Daily aggregated) | "current" (Real-time snapshot)
-    """
-    if not data:
-        st.info("📍 No data to display on map.")
-        return
+        data_key:    Unique key for caching (combines filters).
+        lookup_data: Tuple of (loc_name, rain_level, display_val, label) tuples.
+        level:       "province" | "district"
 
-    # Determine key mapping
+    Returns:
+        Deep-copied GeoJSON dict with fill_color properties set.
+    """
     id_key = "district" if level == "district" else "province"
     geo_name_key = "amp_en" if level == "district" else "NAME_1"
 
-    # Build lookup dicts
+    # Rebuild lookup dict from tuple data
     lookup = {}
-    for d in data:
-        loc_name = d.get(id_key, "")
-        if not loc_name:
-            continue
-            
-        if map_type == "current":
-            current_data = d.get("current", {})
-            precip_mm = float(current_data.get("precipitation_mm", 0.0))
-            r_level = _get_current_rain_level(precip_mm)
-            lookup[loc_name] = {
-                "rain_level": r_level,
-                "display_val": f"{precip_mm} mm/h",
-                "label": "Current Rain Rate"
-            }
-        else:
-            r_level = d.get("rain_level", "No Rain")
-            prob = d.get("rain_probability", 0)
-            vol = round(d.get("rain_volume_mm", 0), 1)
-            lookup[loc_name] = {
-                "rain_level": r_level,
-                "display_val": f"{prob}% (Vol: {vol} mm)",
-                "label": "Daily Prediction"
-            }
+    for item in lookup_data:
+        loc_name, rain_level, display_val, label = item
+        lookup[loc_name] = {
+            "rain_level": rain_level,
+            "display_val": display_val,
+            "label": label,
+        }
 
     geojson = _load_geojson(level)
     name_map = _load_name_map(level)
 
     # Deep copy features to avoid mutating cache
-    import copy
     geojson_copy = copy.deepcopy(geojson)
 
     for feature in geojson_copy["features"]:
@@ -113,7 +101,7 @@ def render_map(data: list[dict], level: str = "province", map_type: str = "predi
 
         # Map GeoJSON name to canonical name
         canonical_name = name_map.get(geo_name, geo_name)
-        
+
         info = lookup.get(canonical_name)
         if info:
             color = RAIN_COLORS.get(info["rain_level"], NO_DATA_COLOR)
@@ -129,11 +117,57 @@ def render_map(data: list[dict], level: str = "province", map_type: str = "predi
         feature["properties"]["fill_color"] = color
         feature["properties"]["loc_name"] = canonical_name
 
+    return geojson_copy
+
+
+def render_map(data: list[dict], level: str = "province", map_type: str = "predicted"):
+    """Render a pydeck GeoJsonLayer choropleth map.
+
+    Args:
+        data: List of forecast dicts.
+        level: "province" | "district"
+        map_type: "predicted" (Daily aggregated) | "current" (Real-time snapshot)
+    """
+    if not data:
+        st.info("📍 No data to display on map.")
+        return
+
+    # Determine key mapping
+    id_key = "district" if level == "district" else "province"
+
+    # Build lookup tuples (hashable for caching)
+    lookup_items = []
+    for d in data:
+        loc_name = d.get(id_key, "")
+        if not loc_name:
+            continue
+
+        if map_type == "current":
+            current_data = d.get("current", {})
+            precip_mm = float(current_data.get("precipitation_mm", 0.0))
+            r_level = _get_current_rain_level(precip_mm)
+            lookup_items.append((
+                loc_name, r_level, f"{precip_mm} mm/h", "Current Rain Rate"
+            ))
+        else:
+            r_level = d.get("rain_level", "No Rain")
+            prob = d.get("rain_probability", 0)
+            vol = round(d.get("rain_volume_mm", 0), 1)
+            lookup_items.append((
+                loc_name, r_level, f"{prob}% (Vol: {vol} mm)", "Daily Prediction"
+            ))
+
+    # Create cache key from sorted lookup items
+    lookup_tuple = tuple(sorted(lookup_items, key=lambda x: x[0]))
+    cache_key = f"{level}_{map_type}_{hash(lookup_tuple)}"
+
+    geojson_copy = _build_geojson_features(cache_key, lookup_tuple, level)
+
     layer = pdk.Layer(
         "GeoJsonLayer",
         data=geojson_copy,
         get_fill_color="properties.fill_color",
-        get_line_color=[255, 255, 255, 40] if level == "province" else [255, 255, 255, 10],
+        get_line_color=[100, 116, 139, 60] if level == "province" else [100, 116, 139, 20],
         line_width_min_pixels=1 if level == "province" else 0,
         pickable=True,
         opacity=0.75,
@@ -147,6 +181,7 @@ def render_map(data: list[dict], level: str = "province", map_type: str = "predi
         pitch=0,
     )
 
+    # Light-themed tooltip (Task 2 — Sky Palette)
     tooltip = {
         "html": (
             "<b>{loc_name}</b><br/>"
@@ -154,12 +189,13 @@ def render_map(data: list[dict], level: str = "province", map_type: str = "predi
             "{label}: {display_val}"
         ),
         "style": {
-            "backgroundColor": "rgba(26, 26, 26, 0.95)",
-            "color": "#E8E6DE",
-            "fontSize": "12px",
+            "backgroundColor": "white",
+            "color": "#0F172A",
+            "fontSize": "13px",
             "padding": "8px 12px",
             "borderRadius": "8px",
-            "border": "0.5px solid rgba(255,255,255,0.1)",
+            "border": "1px solid #BFDBFE",
+            "boxShadow": "0 2px 8px rgba(0,0,0,0.1)",
         },
     }
 
@@ -168,7 +204,8 @@ def render_map(data: list[dict], level: str = "province", map_type: str = "predi
             layers=[layer],
             initial_view_state=view_state,
             tooltip=tooltip,
-            map_style="https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
+            # Light basemap — CartoDB Positron (no API key needed)
+            map_style="https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
         ),
-        use_container_width=True,
+        use_container_width=True,  # TODO: migrate to width='stretch' when min Streamlit >= 1.44
     )

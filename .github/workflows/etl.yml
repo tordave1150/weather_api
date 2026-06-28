@@ -3,9 +3,9 @@ name: Weather ETL
 on:
   schedule:
     # Bangkok time = UTC+7
-    # Morning round  → 05:00 BKK = 22:00 UTC (previous day)
+    # Morning round  → 08:00 BKK = 01:00 UTC
     # Afternoon round → 13:00 BKK = 06:00 UTC
-    - cron: "0 22 * * *"
+    - cron: "0 1 * * *"
     - cron: "0 6 * * *"
 
   # Allow manual trigger from GitHub UI (Actions tab → Run workflow)
@@ -53,20 +53,11 @@ jobs:
             echo "value=${{ github.event.inputs.round }}" >> $GITHUB_OUTPUT
           else
             HOUR=$(date -u +%H)
-            if [ "$HOUR" = "22" ]; then
+            if [ "$HOUR" = "01" ]; then
               echo "value=morning" >> $GITHUB_OUTPUT
             else
               echo "value=afternoon" >> $GITHUB_OUTPUT
             fi
-          fi
-
-      - name: Determine ETL level
-        id: level
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "value=${{ github.event.inputs.level }}" >> $GITHUB_OUTPUT
-          else
-            echo "value=province" >> $GITHUB_OUTPUT
           fi
 
       - name: Run ETL
@@ -74,4 +65,12 @@ jobs:
           MONGODB_URI:        ${{ secrets.MONGODB_URI }}
           MONGODB_DB_NAME:    ${{ secrets.MONGODB_DB_NAME }}
           MONGODB_COLLECTION: ${{ secrets.MONGODB_COLLECTION }}
-        run: python etl/fetch_weather.py --round ${{ steps.round.outputs.value }} --level ${{ steps.level.outputs.value }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # สำหรับการกด Manual ให้ดึงเฉพาะระดับที่เลือก
+            python etl/fetch_weather.py --round ${{ steps.round.outputs.value }} --level ${{ github.event.inputs.level }}
+          else
+            # สำหรับระบบอัตโนมัติ (Cron) ให้ดึงจังหวัดก่อน แล้วตามด้วยอำเภอ
+            python etl/fetch_weather.py --round ${{ steps.round.outputs.value }} --level province
+            python etl/fetch_weather.py --round ${{ steps.round.outputs.value }} --level district
+          fi
