@@ -98,11 +98,11 @@ def fetch_province_forecast(province: dict, fetch_round: str = "morning",
         "forecast_days": 4,
     }
 
-    max_retries = 3
+    max_retries = 2
     data = None
     for attempt in range(max_retries):
         try:
-            resp = requests.get(BASE_URL, params=params, timeout=10)
+            resp = requests.get(BASE_URL, params=params, timeout=5)
             resp.raise_for_status()
             data = resp.json()
             break  # Success
