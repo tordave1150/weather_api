@@ -112,7 +112,7 @@ def fetch_province_forecast(province: dict, fetch_round: str = "morning",
                     # Delay 15s on the very first error
                     label = province.get("district", province["province"])
                     print(f"\n  ⚠️ API error for {label}. Delaying 15s before retrying...", end="", flush=True)
-                    time.sleep(15)
+                    time.sleep(3)
                 else:
                     time.sleep(1)  # Wait 1 second for subsequent retries
             else:

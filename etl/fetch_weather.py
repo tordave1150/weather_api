@@ -128,7 +128,7 @@ def main():
         print(f"Loaded {len(locations)} provinces\n")
 
     # Fetch from Open-Meteo (free tier — no API key)
-    docs = fetch_all_provinces(locations, fetch_round=args.round, level=args.level)
+    docs = fetch_all_provinces(locations, fetch_round=args.round, level=args.level, sleep_sec=0.3)
 
     if not docs:
         print("No data fetched. Check network or Open-Meteo API status.")

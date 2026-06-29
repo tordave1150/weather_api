@@ -116,23 +116,72 @@ try:
         ETL_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "etl", "fetch_weather.py")
 
         if st.button("Refresh", use_container_width=True):
-            with st.spinner("Fetching data..."):
-                try:
-                    import datetime
-                    now_bkk = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=7)))
-                    current_round = "afternoon" if now_bkk.hour >= 13 else "morning"
-                    r = subprocess.run(
-                        [sys.executable, ETL_PATH, "--round", current_round],
-                        capture_output=True, text=True, timeout=300
+            try:
+                import datetime
+                now_bkk = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=7)))
+                current_round = "afternoon" if now_bkk.hour >= 13 else "morning"
+
+                progress = st.progress(0, text="Fetching provinces...")
+                errors = []
+
+                # Province
+                r1 = subprocess.run(
+                    [
+                        sys.executable,
+                        ETL_PATH,
+                        "--round",
+                        current_round,
+                        "--level",
+                        "province",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                )
+
+                if r1.returncode != 0:
+                    errors.append(f"Province: {r1.stderr[:200]}")
+
+                progress.progress(
+                    40,
+                    text="Fetching districts (this takes ~3 min)..."
+                )
+
+                # District
+                r2 = subprocess.run(
+                    [
+                        sys.executable,
+                        ETL_PATH,
+                        "--round",
+                        current_round,
+                        "--level",
+                        "district",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=600,
+                )
+
+                if r2.returncode != 0:
+                    errors.append(f"District: {r2.stderr[:200]}")
+
+                progress.progress(
+                    100,
+                    text="Done!"
+                )
+
+                if not errors:
+                    st.success(
+                        "✅ Province + District fetch complete!"
                     )
-                    if r.returncode == 0:
-                        st.success("✅ Fetch complete!")
-                        st.cache_data.clear()
-                        st.rerun()
-                    else:
-                        st.error(f"❌ {r.stderr[:300]}")
-                except Exception as e:
-                    st.error(f"❌ {e}")
+                    st.cache_data.clear()
+                    st.rerun()
+                else:
+                    st.error(
+                        "❌ " + " | ".join(errors)
+                    )
+            except Exception as e:
+                st.error(f"❌ {e}")
 except Exception as e:
     st.error(
         "🔒 **MongoDB authentication failed.** The database rejected the credentials.\n\n"
