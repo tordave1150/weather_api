@@ -15,24 +15,29 @@
 
 ## 💻 Product Features & UI Overview
 
-The application is divided into two primary dashboards:
+The application is divided into three primary views:
 
-### 1. 🌤 Weather Forecast Dashboard
+### 1. 🏠 Home Page (New)
+*Focus: Fast loading and welcoming entrance*
+- **3D Animated Hero:** Features a custom Canvas 2D particle sphere representing a high-tech radar interface.
+- **Cache Warm-Up:** Intelligently pre-loads heavy GeoJSON files (over 28MB) and MongoDB connections in the background so dashboards open instantly.
+
+### 2. 🌤 Weather Forecast Dashboard
 *Focus: Risk prevention and forward planning (Up to 3 Days)*
 
-- **Executive KPIs & Alerts:** Real-time counters for High Rain Zones and Very Heavy Rain. Automated warning banners appear if critical thresholds are met.
-- **Dual Map Analysis:** Two maps rendered side-by-side.
+- **Executive KPIs & Alerts:** Real-time counters for High Rain Zones and Very Heavy Rain. 
+- **Dual Map Analysis:** Two maps rendered side-by-side using PyDeck.
   - 🗺️ **Predicted Daily Rain Map:** Max probability of rain for the day.
   - 📡 **Current Rain Map:** Real-time exact rain volume (mm) falling.
-- **Visual 3-Day Forecast:** Dynamic, color-coded timeline (Day+1, Day+2, Day+3) organized by region for rapid scanning.
-- **Manual Refresh Button:** Fetches Province then District data sequentially with a live progress bar. Province timeout: 300s. District timeout: 600s.
+- **Dynamic Auto-Zoom (New):** Maps automatically calculate coordinate spreads and zoom/center onto the specific province or districts you filter.
+- **Visual 3-Day Forecast:** Dynamic, color-coded timeline (Day+1, Day+2, Day+3) organized by region.
+- **Manual Refresh Button:** Fetches data on-demand. If districts are selected, it fetches *only* those districts in seconds, bypassing the 35-minute nationwide fetch.
 
-### 2. 🌧 Historical Rain Report (Audit Dashboard)
+### 3. 🌧 Historical Rain Report (Audit Dashboard)
 *Focus: Post-event analysis and claims validation*
 
-- **Historical Data Retrieval:** Select any past date and province to retrieve exact rain data (volume, temperature, wind speed, and hourly rain details).
-- **Live Data Fetching:** On-demand data fetching capability directly from the UI to backfill missing historical records.
-- **Top Impacted Areas:** Automatic Bar Chart highlighting the Top 15 areas with the highest rainfall volume.
+- **Dynamic Interactive Charts (New):** Utilizes `plotly` to render horizontal bar charts. Automatically switches between "Top 15 Provinces" and "Top 15 Districts" based on your filters.
+- **Live Data Fetching:** On-demand data fetching capability directly from the UI.
 - **Detailed Data Grid:** Interactive table displaying comprehensive weather metrics, ready for export.
 
 ---
@@ -63,22 +68,13 @@ The platform is designed to be highly automated and maintenance-free, leveraging
 | **Automation** | GitHub Actions cron — 08:00 & 13:00 Bangkok time |
 | **Frontend** | Streamlit + custom CSS (Sky Palette light theme) |
 
-### ETL Rate Limiting & Retry Config (`app/weather.py`)
-
-| Parameter | Value | Notes |
-|-----------|-------|-------|
-| `sleep_sec` | 0.3s | Delay between requests |
-| `timeout` | 5s | Per HTTP request |
-| `max_retries` | 2 | Retry on error before skipping |
-| Retry delay (attempt 0) | 3s | Down from 15s for faster recovery |
-
 ### Estimated ETL Runtime
 
-| Level | Locations | Estimated Time |
-|-------|-----------|----------------|
-| Province | 77 | ~4 min |
-| District | 913 | ~35 min |
-| **Total (both)** | **990** | **~39 min** |
+| Level | Locations | Estimated Time | Notes |
+|-------|-----------|----------------|-------|
+| Province | 77 | ~4 min | Nationwide |
+| District | 913 | ~35 min | Nationwide |
+| Targeted | 1–15 | ~5 seconds | Triggered via UI refresh button |
 
 ---
 
@@ -94,12 +90,6 @@ Cron Schedule (UTC):
 
 **Scheduled (Cron) runs:** fetch Province → then District automatically.  
 **Manual (workflow_dispatch) runs:** select level (province / district) individually.
-
-```yaml
-timeout-minutes: 45   # covers both province + district in one job
-```
-
-> **MongoDB upsert key:** `{date, province, level}` for provinces and `{date, district, level}` for districts — pressing Refresh multiple times on the same day will **UPDATE**, never duplicate.
 
 ---
 
@@ -127,11 +117,14 @@ timeout-minutes: 45   # covers both province + district in one job
 ### Running the ETL Manually
 
 ```bash
-# Province-level forecast (77 locations, ~4 min)
+# Province-level forecast (77 locations)
 python etl/fetch_weather.py --round morning --level province
 
-# District-level forecast (913 locations, ~35 min)
+# District-level forecast (913 locations)
 python etl/fetch_weather.py --round morning --level district
+
+# Targeted District fetch (super fast, comma-separated)
+python etl/fetch_weather.py --round morning --level district --districts "Mueang Chiang Mai,Hang Dong"
 
 # Historical backfill
 python etl/backfill.py --level district --days 7
