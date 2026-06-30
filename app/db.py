@@ -37,17 +37,19 @@ def get_cache_buster() -> str:
 
 
 @st.cache_data(ttl=600)
-def fetch_weather_data(date_str: str, regions: tuple, rain_levels: tuple, level: str = "province", cache_buster: str = "") -> list[dict]:
+def fetch_weather_data(date_str: str, regions: tuple, rain_levels: tuple, level: str = "province", cache_buster: str = "", selected_districts: tuple = ()) -> list[dict]:
     """Query MongoDB with filter parameters, cached for 10 minutes.
 
     Uses tuple parameters instead of lists because st.cache_data
     requires hashable argument types.
 
     Args:
-        date_str:    Date string in YYYY-MM-DD format.
-        regions:     Tuple of region names, e.g. ("Central", "Northern").
-        rain_levels: Tuple of rain level strings, e.g. ("Heavy Rain",).
-        level:       "province" | "district" — granularity level.
+        date_str:            Date string in YYYY-MM-DD format.
+        regions:             Tuple of region names, e.g. ("Central", "Northern").
+        rain_levels:         Tuple of rain level strings, e.g. ("Heavy Rain",).
+        level:               "province" | "district" — granularity level.
+        selected_districts:  Tuple of district names to filter (district mode only).
+                             When non-empty, adds a $in filter on district.
 
     Returns:
         List of forecast dicts (without _id field).
@@ -62,6 +64,8 @@ def fetch_weather_data(date_str: str, regions: tuple, rain_levels: tuple, level:
         query["region"] = {"$in": list(regions)}
     if rain_levels:
         query["rain_level"] = {"$in": list(rain_levels)}
+    if selected_districts and level == "district":
+        query["district"] = {"$in": list(selected_districts)}
 
     sort_key = "district" if level == "district" else "province"
     docs = list(col.find(query, {"_id": 0}).sort(sort_key, 1))
@@ -91,14 +95,16 @@ def upsert_forecast(collection, doc: dict):
 
 
 def get_forecasts(collection, date: str, regions: list[str] | None = None,
-                  level: str = "province") -> list[dict]:
+                  level: str = "province",
+                  selected_districts: list[str] | None = None) -> list[dict]:
     """Return all location docs for a given date, optionally filtered by region.
 
     Args:
-        collection: PyMongo collection object.
-        date: Date string in YYYY-MM-DD format.
-        regions: Optional list of region names to filter by.
-        level: "province" | "district" — granularity level.
+        collection:          PyMongo collection object.
+        date:                Date string in YYYY-MM-DD format.
+        regions:             Optional list of region names to filter by.
+        level:               "province" | "district" — granularity level.
+        selected_districts:  Optional list of district names to filter (district mode only).
 
     Returns:
         List of forecast dicts (without _id field).
@@ -109,6 +115,8 @@ def get_forecasts(collection, date: str, regions: list[str] | None = None,
     query["level"] = level
     if regions:
         query["region"] = {"$in": regions}
+    if selected_districts and level == "district":
+        query["district"] = {"$in": selected_districts}
     sort_key = "district" if level == "district" else "province"
     return list(collection.find(query, {"_id": 0}).sort(sort_key, 1))
 

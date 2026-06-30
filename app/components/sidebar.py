@@ -2,6 +2,8 @@
 Sidebar filter controls for the Weather Advisor dashboard.
 """
 
+import json
+import pathlib
 from datetime import datetime, date
 
 import streamlit as st
@@ -10,6 +12,28 @@ from db import get_date_range
 
 ALL_REGIONS = ["Northern", "Northeastern", "Central", "Eastern", "Western", "Southern"]
 ALL_RAIN_LEVELS = ["No Rain", "Light Rain", "Moderate Rain", "Heavy Rain", "Very Heavy Rain"]
+
+MAX_DISTRICT_WARNING = 50  # Warn if more than this many districts are selected
+
+
+@st.cache_data
+def _load_province_districts_map() -> dict[str, list[str]]:
+    """Build a province → sorted list of district names mapping from districts.json."""
+    path = pathlib.Path(__file__).resolve().parent.parent.parent / "data" / "districts.json"
+    if not path.exists():
+        return {}
+    with open(path, "r", encoding="utf-8") as f:
+        districts = json.load(f)
+    mapping: dict[str, list[str]] = {}
+    for d in districts:
+        prov = d.get("province", "")
+        dist = d.get("district", "")
+        if prov and dist:
+            mapping.setdefault(prov, []).append(dist)
+    # Sort each province's district list
+    for prov in mapping:
+        mapping[prov].sort()
+    return mapping
 
 
 def render_sidebar(collection, available_provinces: list[str],
@@ -23,8 +47,10 @@ def render_sidebar(collection, available_provinces: list[str],
 
     Returns:
         Dict with keys: 'selected_date', 'regions', 'rain_levels',
-        'province_search', 'level', 'selected_province'.
+        'province_search', 'level', 'selected_province', 'selected_districts'.
     """
+    province_districts_map = _load_province_districts_map()
+
     with st.sidebar:
         # ── Logo row ──────────────────────────────────────────────────
         st.markdown("""
@@ -62,7 +88,7 @@ def render_sidebar(collection, available_provinces: list[str],
             max_date = date.today()
 
         selected_date = st.date_input(
-            "📅 Select Date",
+            "Select Date",
             value=max_date,
             min_value=min_date,
             max_value=max_date,
@@ -72,7 +98,7 @@ def render_sidebar(collection, available_provinces: list[str],
         # ── Region multi-select ───────────────────────────────────────
         st.markdown('<p style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:#6B6A63; margin: 16px 0 4px 0;">REGION</p>', unsafe_allow_html=True)
         regions = st.multiselect(
-            "🗺️ Regions",
+            "Regions",
             options=ALL_REGIONS,
             default=ALL_REGIONS,
             label_visibility="collapsed",
@@ -81,7 +107,7 @@ def render_sidebar(collection, available_provinces: list[str],
         # ── Rain level filter ─────────────────────────────────────────
         st.markdown('<p style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:#6B6A63; margin: 16px 0 4px 0;">RAIN LEVEL</p>', unsafe_allow_html=True)
         rain_levels = st.multiselect(
-            "🌧️ Rain Level",
+            "Rain Level",
             options=ALL_RAIN_LEVELS,
             default=["Moderate Rain", "Heavy Rain", "Very Heavy Rain"],
             label_visibility="collapsed",
@@ -90,30 +116,55 @@ def render_sidebar(collection, available_provinces: list[str],
         # ── Province / District filter ────────────────────────────────
         selected_province = None
         province_search = ""
+        selected_districts: list[str] = []
 
         if level_value == "district":
-            # In district mode: show province selector to scope districts
+            # Province scope selector — narrows the district multiselect
             st.markdown('<p style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:#6B6A63; margin: 16px 0 4px 0;">PROVINCE (SCOPE)</p>', unsafe_allow_html=True)
             selected_province = st.selectbox(
-                "🏛️ Province",
+                "Province",
                 options=["All Provinces"] + available_provinces,
                 label_visibility="collapsed",
             )
             if selected_province == "All Provinces":
                 selected_province = None
 
-            # District search within selected province
-            st.markdown('<p style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:#6B6A63; margin: 16px 0 4px 0;">DISTRICT</p>', unsafe_allow_html=True)
-            province_search = st.text_input(
-                "🔍 Filter district",
-                placeholder="Filter district...",
+            # Build the options list — scoped to province or full 913
+            if selected_province and selected_province in province_districts_map:
+                district_options = province_districts_map[selected_province]
+            else:
+                # All districts across all provinces
+                district_options = sorted(available_districts) if available_districts else []
+
+            st.markdown('<p style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:#6B6A63; margin: 16px 0 4px 0;">DISTRICTS</p>', unsafe_allow_html=True)
+
+            # Restore previous selection from session state, but only keep
+            # districts that are valid in the current options list
+            prev_key = f"_districts_sel_{selected_province or 'all'}"
+            prev_sel = [d for d in st.session_state.get(prev_key, []) if d in district_options]
+
+            selected_districts = st.multiselect(
+                "Select districts",
+                options=district_options,
+                default=prev_sel,
+                placeholder="Choose districts…",
                 label_visibility="collapsed",
             )
+
+            # Persist selection
+            st.session_state[prev_key] = selected_districts
+
+            if len(selected_districts) > MAX_DISTRICT_WARNING:
+                st.warning(
+                    f"Large selection ({len(selected_districts)} districts) — "
+                    "rendering may be slow. Consider selecting fewer than 50."
+                )
+
         else:
-            # In province mode: free-text search
+            # Province mode: free-text search
             st.markdown('<p style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:#6B6A63; margin: 16px 0 4px 0;">PROVINCE</p>', unsafe_allow_html=True)
             province_search = st.text_input(
-                "🔍 Filter province",
+                "Filter province",
                 placeholder="Filter province...",
                 label_visibility="collapsed",
             )
@@ -125,4 +176,5 @@ def render_sidebar(collection, available_provinces: list[str],
         "province_search": province_search,
         "level": level_value,
         "selected_province": selected_province,
+        "selected_districts": selected_districts,
     }

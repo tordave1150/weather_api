@@ -122,8 +122,10 @@ def apply_theme() -> None:
         font-family: var(--font-body) !important;
     }
     .block-container {
-        padding-top: 1rem !important;
-        padding-bottom: 1rem !important;
+        padding-top: 3.5rem !important;
+        padding-bottom: 2rem !important;
+        padding-left: 2rem !important;
+        padding-right: 2rem !important;
         max-width: 1400px !important;
     }
 

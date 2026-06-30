@@ -36,6 +36,16 @@ def _load_geojson(level: str):
         return json.load(f)
 
 
+def load_province_geojson():
+    """Public wrapper — pre-warm the province GeoJSON cache from home.py."""
+    return _load_geojson("province")
+
+
+def load_district_geojson():
+    """Public wrapper — pre-warm the district GeoJSON cache from home.py."""
+    return _load_geojson("district")
+
+
 @st.cache_data
 def _load_name_map(level: str):
     """Load GeoJSON → canonical name mapping."""
@@ -86,17 +96,24 @@ def _build_geojson_features(data_key: str, lookup_data: tuple, level: str):
     geojson = _load_geojson(level)
     name_map = _load_name_map(level)
 
-    # Deep copy features to avoid mutating cache
-    geojson_copy = copy.deepcopy(geojson)
+    # Shallow copy features to avoid massive deepcopy overhead for GeoJSON coords
+    geojson_copy = {"type": geojson.get("type", "FeatureCollection"), "features": []}
 
-    for feature in geojson_copy["features"]:
-        geo_name = feature["properties"].get(geo_name_key, "")
+    for feature in geojson["features"]:
+        new_feature = {
+            "type": feature.get("type", "Feature"),
+            "geometry": feature.get("geometry"),  # keep reference to massive geometry array
+            "properties": feature.get("properties", {}).copy() # copy properties so we can mutate
+        }
+
+        geo_name = new_feature["properties"].get(geo_name_key, "")
 
         if "Lake" in geo_name:
-            feature["properties"]["fill_color"] = [0, 0, 0, 0]
-            feature["properties"]["rain_level"] = ""
-            feature["properties"]["display_val"] = ""
-            feature["properties"]["loc_name"] = ""
+            new_feature["properties"]["fill_color"] = [0, 0, 0, 0]
+            new_feature["properties"]["rain_level"] = ""
+            new_feature["properties"]["display_val"] = ""
+            new_feature["properties"]["loc_name"] = ""
+            geojson_copy["features"].append(new_feature)
             continue
 
         # Map GeoJSON name to canonical name
@@ -105,17 +122,19 @@ def _build_geojson_features(data_key: str, lookup_data: tuple, level: str):
         info = lookup.get(canonical_name)
         if info:
             color = RAIN_COLORS.get(info["rain_level"], NO_DATA_COLOR)
-            feature["properties"]["rain_level"] = info["rain_level"]
-            feature["properties"]["display_val"] = info["display_val"]
-            feature["properties"]["label"] = info["label"]
+            new_feature["properties"]["rain_level"] = info["rain_level"]
+            new_feature["properties"]["display_val"] = info["display_val"]
+            new_feature["properties"]["label"] = info["label"]
         else:
             color = NO_DATA_COLOR
-            feature["properties"]["rain_level"] = "No Data"
-            feature["properties"]["display_val"] = "—"
-            feature["properties"]["label"] = "Status"
+            new_feature["properties"]["rain_level"] = "No Data"
+            new_feature["properties"]["display_val"] = "—"
+            new_feature["properties"]["label"] = "Status"
 
-        feature["properties"]["fill_color"] = color
-        feature["properties"]["loc_name"] = canonical_name
+        new_feature["properties"]["fill_color"] = color
+        new_feature["properties"]["loc_name"] = canonical_name
+
+        geojson_copy["features"].append(new_feature)
 
     return geojson_copy
 
@@ -174,12 +193,40 @@ def render_map(data: list[dict], level: str = "province", map_type: str = "predi
         stroked=True,
     )
 
-    view_state = pdk.ViewState(
-        latitude=13.0,
-        longitude=101.0,
-        zoom=5.0,
-        pitch=0,
-    )
+    # Calculate map center and zoom dynamically
+    lats = [d.get("lat") for d in data if d.get("lat") is not None]
+    lons = [d.get("lon") for d in data if d.get("lon") is not None]
+    
+    if lats and lons:
+        avg_lat = sum(lats) / len(lats)
+        avg_lon = sum(lons) / len(lons)
+        
+        # Calculate appropriate zoom based on coordinate spread
+        lat_spread = max(lats) - min(lats)
+        lon_spread = max(lons) - min(lons)
+        max_spread = max(lat_spread, lon_spread)
+        
+        if max_spread > 0:
+            import math
+            zoom_level = math.log2(360.0 / max_spread) - 1.5
+            zoom_level = max(5.0, min(zoom_level, 9.0)) # Clamp between country (5) and district cluster (9)
+        else:
+            zoom_level = 9.0 if level == "district" else 6.0
+            
+        view_state = pdk.ViewState(
+            latitude=avg_lat,
+            longitude=avg_lon,
+            zoom=zoom_level,
+            pitch=0,
+        )
+    else:
+        # Fallback to whole Thailand
+        view_state = pdk.ViewState(
+            latitude=13.0,
+            longitude=101.0,
+            zoom=5.0,
+            pitch=0,
+        )
 
     # Light-themed tooltip (Task 2 — Sky Palette)
     tooltip = {

@@ -97,7 +97,7 @@ try:
     collection = get_db()
 except Exception as e:
     st.error(
-        "🔒 **MongoDB connection failed.** Please check your credentials in "
+        "**MongoDB connection failed.** Please check your credentials in "
         "`.streamlit/secrets.toml`.\n\n"
         f"Error: `{type(e).__name__}`"
     )
@@ -142,25 +142,43 @@ try:
                 if r1.returncode != 0:
                     errors.append(f"Province: {r1.stderr[:200]}")
 
-                progress.progress(
-                    40,
-                    text="Fetching districts (this takes ~3 min)..."
-                )
+                # District: targeted fetch if user has selected districts, else full fetch
+                _sel_districts = filters.get("selected_districts", [])
+                _level_now = filters.get("level", "province")
 
-                # District
-                r2 = subprocess.run(
-                    [
-                        sys.executable,
-                        ETL_PATH,
-                        "--round",
-                        current_round,
-                        "--level",
-                        "district",
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=600,
-                )
+                if _level_now == "district" and _sel_districts:
+                    dist_arg = ",".join(_sel_districts)
+                    progress.progress(40, text=f"Fetching {len(_sel_districts)} selected district(s)...")
+                    r2 = subprocess.run(
+                        [
+                            sys.executable,
+                            ETL_PATH,
+                            "--round", current_round,
+                            "--level", "district",
+                            "--districts", dist_arg,
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=300,
+                    )
+                else:
+                    progress.progress(
+                        40,
+                        text="Fetching all districts (this takes ~3 min)..."
+                    )
+                    r2 = subprocess.run(
+                        [
+                            sys.executable,
+                            ETL_PATH,
+                            "--round",
+                            current_round,
+                            "--level",
+                            "district",
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=600,
+                    )
 
                 if r2.returncode != 0:
                     errors.append(f"District: {r2.stderr[:200]}")
@@ -172,19 +190,19 @@ try:
 
                 if not errors:
                     st.success(
-                        "✅ Province + District fetch complete!"
+                        "Province + District fetch complete!"
                     )
                     st.cache_data.clear()
                     st.rerun()
                 else:
                     st.error(
-                        "❌ " + " | ".join(errors)
+                        " | ".join(errors)
                     )
             except Exception as e:
-                st.error(f"❌ {e}")
+                st.error(f"{e}")
 except Exception as e:
     st.error(
-        "🔒 **MongoDB authentication failed.** The database rejected the credentials.\n\n"
+        "**MongoDB authentication failed.** The database rejected the credentials.\n\n"
         "Please verify the `uri`, `db_name`, and `collection` values in "
         "`.streamlit/secrets.toml`.\n\n"
         f"Error: `{type(e).__name__}`"
@@ -197,6 +215,15 @@ selected_rain_levels = filters["rain_levels"]
 province_search = filters.get("province_search", "")
 level = filters.get("level", "province")
 selected_province = filters.get("selected_province")
+selected_districts = filters.get("selected_districts", [])
+
+# ── Empty-state guard for district mode ──────────────────────────────
+if level == "district" and not selected_districts:
+    st.info(
+        "Select one or more districts in the sidebar to load the dashboard."
+    )
+    st.stop()
+
 
 # ── Fetch Data ────────────────────────────────────────────────────────
 raw_data = fetch_weather_data(
@@ -205,6 +232,7 @@ raw_data = fetch_weather_data(
     rain_levels=tuple(selected_rain_levels) if selected_rain_levels else (),
     level=level,
     cache_buster=get_cache_buster(),
+    selected_districts=tuple(selected_districts) if selected_districts else (),
 )
 
 # Apply filters client-side
@@ -212,17 +240,14 @@ data = raw_data
 if selected_rain_levels:
     data = [d for d in data if d.get("rain_level") in selected_rain_levels]
 
-# Province scope filter (district mode)
+# Province scope filter (district mode — retained for any residual client-side scoping)
 if level == "district" and selected_province:
     data = [d for d in data if d.get("province") == selected_province]
 
-# Text search filter
-if province_search:
+# Text search filter (province mode only now)
+if province_search and level == "province":
     search_lower = province_search.lower()
-    if level == "district":
-        data = [d for d in data if search_lower in d.get("district", "").lower()]
-    else:
-        data = [d for d in data if search_lower in d.get("province", "").lower()]
+    data = [d for d in data if search_lower in d.get("province", "").lower()]
 
 # Enrich with lat/lon from static data (in case MongoDB docs don't have them)
 for doc in data:
@@ -305,7 +330,7 @@ with kpi4:
 col_map_curr, col_map_pred = st.columns(2)
 
 with col_map_pred:
-    map_title_pred = "🗺️ Rainfall Forecast"
+    map_title_pred = "Rainfall Forecast"
     st.markdown(f"""
     <div class="section-card-header">
         <h3>{map_title_pred}</h3>
@@ -319,7 +344,7 @@ with col_map_pred:
     render_map(data, level=level, map_type="predicted")
 
 with col_map_curr:
-    map_title_curr = "📡 Live Precipitation"
+    map_title_curr = "Live Precipitation"
     st.markdown(f"""
     <div class="section-card-header">
         <h3>{map_title_curr}</h3>
@@ -343,7 +368,7 @@ else:
 
 st.markdown(f"""
 <div class="section-card-header" style="margin-top: 8px; background: #FFFFFF; border-radius: 12px 12px 0 0; border: 1px solid #BFDBFE; border-bottom: none;">
-    <h3>📅 Regional Outlook (3-Day)</h3>
+    <h3>Regional Outlook — 3-Day</h3>
     <div class="legend"><span>{date_range_str}</span></div>
 </div>
 """, unsafe_allow_html=True)
@@ -427,11 +452,11 @@ if data:
                             """, unsafe_allow_html=True)
                 st.divider()
 else:
-    st.info("No forecast data available. Run the ETL script first: `python etl/fetch_weather.py`")
+    st.info("No forecast data available. Run the ETL script first: python etl/fetch_weather.py")
 
 # ── Export Buttons (sidebar) ──────────────────────────────────────────
 render_export(data, selected_date, level=level)
 
-# ── Footer ────────────────────────────────────────────────────────────
+# ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown("---")
-st.caption("⛈ Weather Advisor • Data source: Open-Meteo API • Storage: MongoDB Atlas")
+st.caption("Weather Advisor • Data source: Open-Meteo API • Storage: MongoDB Atlas")

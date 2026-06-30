@@ -5,10 +5,12 @@ Daily ETL — fetch Open-Meteo forecasts for Thai provinces/districts → upsert
 Spec: OPEN_METEO_FETCH.md sections 7, 9
 
 Usage:
-    python etl/fetch_weather.py                                # province, morning
-    python etl/fetch_weather.py --round afternoon              # province, afternoon
-    python etl/fetch_weather.py --level district               # district, morning
-    python etl/fetch_weather.py --level district --round afternoon
+    python etl/fetch_weather.py                                            # province, morning
+    python etl/fetch_weather.py --round afternoon                          # province, afternoon
+    python etl/fetch_weather.py --level district                           # district, morning (all 913)
+    python etl/fetch_weather.py --level district --round afternoon         # district, afternoon (all 913)
+    python etl/fetch_weather.py --level district --province "Chiang Mai"   # scope to one province's districts
+    python etl/fetch_weather.py --level district --districts "Bang Rak,Din Daeng"  # fetch specific districts
 
 Cron schedule (UTC):
     0 1 * * *   python etl/fetch_weather.py --round morning    (= 08:00 Bangkok)
@@ -112,6 +114,18 @@ def main():
         default="province",
         help="Granularity level: province (77 locations) or district (~913 locations)"
     )
+    parser.add_argument(
+        "--districts",
+        default="",
+        help="Comma-separated list of district names to fetch (district level only). "
+             "When provided, only those districts are fetched instead of all 913."
+    )
+    parser.add_argument(
+        "--province",
+        default="",
+        help="Scope district fetch to one province's districts (district level only). "
+             "Uses the 'province' field in districts.json to filter."
+    )
     args = parser.parse_args()
 
     print(f"\n{'='*55}")
@@ -122,7 +136,23 @@ def main():
     # Load location list based on level
     if args.level == "district":
         locations = json.loads(DISTRICTS_PATH.read_text(encoding="utf-8"))
-        print(f"Loaded {len(locations)} districts\n")
+        print(f"Loaded {len(locations)} districts from file")
+
+        # Apply subset filters if provided (additive: both --districts and --province can narrow the list)
+        if args.districts:
+            requested = {d.strip() for d in args.districts.split(",") if d.strip()}
+            locations = [loc for loc in locations if loc.get("district") in requested]
+            print(f"  --districts filter applied: {len(locations)} districts selected")
+        elif args.province:
+            locations = [loc for loc in locations if loc.get("province") == args.province.strip()]
+            print(f"  --province filter applied: {len(locations)} districts in '{args.province.strip()}'")
+        else:
+            print(
+                "  WARNING: No --districts or --province filter specified. "
+                "Fetching all 913 districts (slow path — may take 45+ min)."
+            )
+
+        print(f"  Fetching {len(locations)} districts\n")
     else:
         locations = json.loads(PROVINCES_PATH.read_text(encoding="utf-8"))
         print(f"Loaded {len(locations)} provinces\n")
